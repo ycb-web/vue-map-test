@@ -1,5 +1,36 @@
 let map2D;
 let viewer;
+
+// 台风强度对应的颜色
+const TYPHOON_COLORS = {
+  TD: "#00BFFF", // 热带低压 - 浅蓝
+  TS: "#00FF00", // 热带风暴 - 绿色
+  STS: "#FFFF00", // 强热带风暴 - 黄色
+  TY: "#FFA500", // 台风 - 橙色
+  STY: "#FF00FF", // 强台风 - 粉色
+  "Super TY": "#FF0000", // 超强台风 - 红色
+};
+
+// 预报机构颜色
+const FORECAST_COLORS = {
+  中国: "#FF0000",
+  日本: "#00FF00",
+  韩国: "#0000FF",
+  美国: "#FFFF00",
+  欧洲: "#FF00FF",
+};
+
+// 根据强度描述获取颜色
+function getTyphoonColor(strong) {
+  if (!strong) return "#00BFFF";
+  if (strong.includes("超强台风")) return TYPHOON_COLORS["Super TY"];
+  if (strong.includes("强台风")) return TYPHOON_COLORS["STY"];
+  if (strong.includes("台风")) return TYPHOON_COLORS["TY"];
+  if (strong.includes("强热带风暴")) return TYPHOON_COLORS["STS"];
+  if (strong.includes("热带风暴")) return TYPHOON_COLORS["TS"];
+  return TYPHOON_COLORS["TD"];
+}
+
 export default {
   scalarLayer: null,
   velocityLayer: null,
