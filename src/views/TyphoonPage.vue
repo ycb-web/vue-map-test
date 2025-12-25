@@ -234,6 +234,8 @@ export default {
       // 7级风圈
       if (point.radius7 > 0 || point.en7 > 0) {
         const circle7 = this.createWindCircle(point, 7);
+
+        console.log(circle7, 'circle7')
         if (circle7) {
           circle7.addTo(this.map);
           this.dynamicLayers.push(circle7);
@@ -269,6 +271,8 @@ export default {
       const es = point[esKey] || point[radiusKey] || 0;
       const wn = point[wnKey] || point[radiusKey] || 0;
       const ws = point[wsKey] || point[radiusKey] || 0;
+
+      console.log(`en: ${en}, es: ${es}, wn: ${wn}, ws: ${ws}`)
 
       if (en === 0 && es === 0 && wn === 0 && ws === 0) return null;
 

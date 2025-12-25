@@ -3,6 +3,7 @@
     <nav class="nav-bar">
       <router-link to="/wind" class="nav-link">风场</router-link>
       <router-link to="/typhoon" class="nav-link">台风</router-link>
+      <router-link to="/wms" class="nav-link">wms</router-link>
     </nav>
     <div class="page-container">
       <router-view />

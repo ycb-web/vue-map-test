@@ -621,4 +621,72 @@ export default {
       this.tileScalarLayer = null;
     }
   },
+
+  // 添加 GeoServer WMS 图层
+  addWmsLayer(map, options = {}) {
+    const defaultOptions = {
+      url: "http://localhost:8080/geoserver/wms",
+      layers: "ne:my_points",
+      styles: "population",
+      format: "image/png",
+      transparent: true,
+      version: "1.1.1",
+      opacity: 0.8,
+    };
+
+    const wmsOptions = { ...defaultOptions, ...options };
+    const { url, opacity, ...layerParams } = wmsOptions;
+
+    // 使用传入的 map 或默认的 map2D
+    const targetMap = map || map2D;
+    if (!targetMap) {
+      console.error("地图实例不存在");
+      return null;
+    }
+
+    if (this.wmsLayer) {
+      this.removeWmsLayer(targetMap);
+    }
+
+    this.wmsLayer = L.tileLayer.wms(url, {
+      layers: layerParams.layers,
+      styles: layerParams.styles,
+      format: layerParams.format,
+      transparent: layerParams.transparent,
+      version: layerParams.version,
+      attribution: "GeoServer",
+      opacity: opacity,
+    });
+
+    this.wmsLayer.addTo(targetMap);
+    return this.wmsLayer;
+  },
+
+  // 移除 WMS 图层
+  removeWmsLayer(map) {
+    const targetMap = map || map2D;
+    if (this.wmsLayer && targetMap) {
+      targetMap.removeLayer(this.wmsLayer);
+      this.wmsLayer = null;
+    }
+  },
+
+  // 设置 WMS 图层透明度
+  setWmsOpacity(opacity) {
+    if (this.wmsLayer) {
+      this.wmsLayer.setOpacity(opacity);
+    }
+  },
+
+  // 更新 WMS 图层参数（如切换样式）
+  updateWmsParams(map, params) {
+    if (this.wmsLayer) {
+      this.wmsLayer.setParams(params);
+    }
+  },
+
+  // 获取地图实例
+  getMap() {
+    return map2D;
+  },
 };
