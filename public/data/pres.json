@@ -1,0 +1,28 @@
+[
+  {
+    "header": {
+      "refTime": "2024-01-25 20:00:00",
+      "begTime": "2024-01-25 20:00:00",
+      "parameterCategory": 2,
+      "parameterCategoryName": "nc",
+      "parameterNumber": 1,
+      "parameterNumberName": "pressure",
+      "numberPoints": 1032480,
+      "nx": 1440,
+      "ny": 717,
+      "basicAngle": 0,
+      "lo1": 0,
+      "la1": 89.5,
+      "lo2": 359.75,
+      "la2": -89.5,
+      "dx": 0.25,
+      "dy": 0.25,
+      "scaleVal": 1,
+      "addVal": -950.3220825195312
+    },
+    "data": "",
+    "imgUrl": "./data/leaflet/geojson/pres_u.png",
+    "backGround": "",
+    "windPole": ""
+  }
+]

@@ -3,6 +3,7 @@ import VueRouter from "vue-router";
 import WindPage from "../views/WindPage.vue";
 import TyphoonPage from "../views/TyphoonPage.vue";
 import WmsPage from "../views/WmsPage.vue";
+import ContourPage from "../views/ContourPage.vue";
 
 Vue.use(VueRouter);
 
@@ -25,6 +26,11 @@ const routes = [
     path: "/wms",
     name: "Wms",
     component: WmsPage,
+  },
+  {
+    path: "/contour",
+    name: "Contour",
+    component: ContourPage,
   },
 ];
 
