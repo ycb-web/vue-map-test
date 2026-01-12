@@ -4,6 +4,7 @@ import WindPage from "../views/WindPage.vue";
 import TyphoonPage from "../views/TyphoonPage.vue";
 import WmsPage from "../views/WmsPage.vue";
 import ContourPage from "../views/ContourPage.vue";
+import EditPage from "../views/EditPage.vue";
 
 Vue.use(VueRouter);
 
@@ -31,6 +32,11 @@ const routes = [
     path: "/contour",
     name: "Contour",
     component: ContourPage,
+  },
+  {
+    path: "/edit",
+    name: "Edit",
+    component: EditPage,
   },
 ];
 
