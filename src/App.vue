@@ -5,6 +5,7 @@
       <router-link to="/typhoon" class="nav-link">台风</router-link>
       <router-link to="/wms" class="nav-link">wms</router-link>
       <router-link to="/contour" class="nav-link">等值线</router-link>
+      <router-link to="/edit" class="nav-link">编辑</router-link>
     </nav>
     <div class="page-container">
       <router-view />

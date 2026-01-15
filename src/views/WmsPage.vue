@@ -1,6 +1,12 @@
 <template>
   <div class="wms-page">
-    <div id="wms-map" class="map-container"></div>
+    <BaseMap
+      ref="baseMap"
+      basemap="osm"
+      :options="mapOptions"
+      :show-annotation="false"
+      @map-ready="onMapReady"
+    />
     <div class="controls">
       <h3>WMS 图层控制</h3>
       <div class="control-item">
@@ -34,6 +40,16 @@
         <button @click="zoomToLayer" :disabled="!showWms">定位到图层</button>
         <button @click="refreshLayer" :disabled="!showWms">刷新图层</button>
       </div>
+      <div class="control-item">
+        <label>底图切换</label>
+        <select v-model="currentBasemap" @change="changeBasemap">
+          <option value="osm">OpenStreetMap</option>
+          <option value="tianditu_img">天地图影像</option>
+          <option value="tianditu_vec">天地图矢量</option>
+          <option value="dark">暗色底图</option>
+          <option value="gaode_vec">高德矢量</option>
+        </select>
+      </div>
       <div class="wms-info">
         <p>服务地址: {{ wmsUrl }}</p>
         <p>图层: {{ layers }}</p>
@@ -44,9 +60,11 @@
 
 <script>
 import L from "leaflet";
+import BaseMap from "@/components/BaseMap.vue";
 
 export default {
   name: "WmsPage",
+  components: { BaseMap },
   data() {
     return {
       map: null,
@@ -54,44 +72,24 @@ export default {
       showWms: true,
       opacity: 0.8,
       currentStyle: "population",
+      currentBasemap: "osm",
       wmsUrl: "http://localhost:8080/geoserver/wms",
       layers: "ne:my_points",
-      // 美国本土范围
       layerBounds: [
         [24, -130],
         [50, -66],
       ],
-    };
-  },
-  mounted() {
-    this.initMap();
-  },
-  beforeDestroy() {
-    if (this.map) {
-      this.map.remove();
-      this.map = null;
-    }
-  },
-  methods: {
-    initMap() {
-      // 初始化地图，中心设置为美国
-      this.map = L.map("wms-map", {
+      mapOptions: {
+        center: [37, -98],
         zoom: 4,
         maxZoom: 18,
         minZoom: 2,
-        zoomControl: true,
-      }).setView([37, -98], 4);
-
-      // 添加底图
-      L.tileLayer(
-        "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-        {
-          maxZoom: 18,
-          attribution: '© OpenStreetMap contributors',
-        }
-      ).addTo(this.map);
-
-      // 默认加载 WMS 图层
+      },
+    };
+  },
+  methods: {
+    onMapReady(map) {
+      this.map = map;
       if (this.showWms) {
         this.addWmsLayer();
       }
@@ -131,12 +129,14 @@ export default {
         this.addWmsLayer();
       }
     },
+    changeBasemap() {
+      this.$refs.baseMap.setBasemap(this.currentBasemap);
+    },
     zoomToLayer() {
       this.map.fitBounds(this.layerBounds);
     },
     refreshLayer() {
       if (this.wmsLayer) {
-        // 通过重新添加图层来刷新
         this.addWmsLayer();
       }
     },
@@ -149,11 +149,6 @@ export default {
   width: 100%;
   height: 100%;
   position: relative;
-}
-.map-container {
-  width: 100%;
-  height: 100%;
-  z-index: 1;
 }
 .controls {
   position: absolute;
