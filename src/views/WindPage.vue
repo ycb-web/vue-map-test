@@ -1,6 +1,7 @@
 <template>
   <div class="wind-page">
     <div id="wind-map" class="map-container"></div>
+    <MapToolbar class="toolbar" :map="map" @reset-view="resetView" />
     <div class="chart-container" id="chart"></div>
     <div class="controls">
       <div class="control-item">
@@ -38,9 +39,13 @@ import windData from "../assets/wind.json";
 import chartData from "../assets/chartData.json";
 import * as echarts from "echarts";
 import { getProcessLineOption } from "../utils/getProcessLineOption";
+import MapToolbar from "../components/MapToolbar";
 
 export default {
   name: "WindPage",
+  components: {
+    MapToolbar,
+  },
   data() {
     return {
       map: null,
@@ -81,22 +86,14 @@ export default {
       this.chart && this.chart.resize();
     },
     initMap() {
+      // 创建地图，初始视图由 MapToolbar 组件设置
       this.map = L.map("wind-map", {
-        zoom: 5,
         maxZoom: 16,
-        zoomControl: true,
+        zoomControl: false,
         zoomAnimation: true,
-      }).setView([24.5, 118], 8.4);
+      });
 
-      L.tileLayer(
-        "https://t0.tianditu.gov.cn/img_w/wmts?tk=93724b915d1898d946ca7dc7b765dda5&SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=img&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TileMatrix={z}&TileCol={x}&TileRow={y}",
-        { maxZoom: 16, zoom: 5, detectRetina: true }
-      ).addTo(this.map);
-
-      L.tileLayer(
-        "https://t0.tianditu.gov.cn/cia_w/wmts?tk=93724b915d1898d946ca7dc7b765dda5&SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=cia&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TileMatrix={z}&TileCol={x}&TileRow={y}",
-        { transparent: true, zIndex: 3 }
-      ).addTo(this.map);
+      // 底图由 MapToolbar 组件管理
 
       if (this.showScalar) this.addScalarLayer();
       if (this.showVector) this.addVectorLayer();
@@ -184,6 +181,11 @@ export default {
         this.barbLayer = null;
       }
     },
+    resetView() {
+      if (this.map) {
+        this.map.setView([24.5, 118], 8.4);
+      }
+    },
   },
 };
 </script>
@@ -198,6 +200,13 @@ export default {
   width: 100%;
   height: 100%;
   z-index: 1;
+}
+.toolbar {
+  position: absolute;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
 }
 .chart-container {
   position: absolute;

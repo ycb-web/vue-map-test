@@ -18,7 +18,11 @@ const BASEMAP_PRESETS = {
     },
     annotation: {
       url: "https://t{s}.tianditu.gov.cn/cia_w/wmts?tk={tk}&SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=cia&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TileMatrix={z}&TileCol={x}&TileRow={y}",
-      options: { subdomains: ["0", "1", "2", "3", "4", "5", "6", "7"], transparent: true, zIndex: 3 },
+      options: {
+        subdomains: ["0", "1", "2", "3", "4", "5", "6", "7"],
+        transparent: true,
+        zIndex: 3,
+      },
     },
   },
   // 天地图矢量
@@ -30,7 +34,11 @@ const BASEMAP_PRESETS = {
     },
     annotation: {
       url: "https://t{s}.tianditu.gov.cn/cva_w/wmts?tk={tk}&SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=cva&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TileMatrix={z}&TileCol={x}&TileRow={y}",
-      options: { subdomains: ["0", "1", "2", "3", "4", "5", "6", "7"], transparent: true, zIndex: 3 },
+      options: {
+        subdomains: ["0", "1", "2", "3", "4", "5", "6", "7"],
+        transparent: true,
+        zIndex: 3,
+      },
     },
   },
   // 天地图地形
@@ -42,7 +50,11 @@ const BASEMAP_PRESETS = {
     },
     annotation: {
       url: "https://t{s}.tianditu.gov.cn/cta_w/wmts?tk={tk}&SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=cta&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TileMatrix={z}&TileCol={x}&TileRow={y}",
-      options: { subdomains: ["0", "1", "2", "3", "4", "5", "6", "7"], transparent: true, zIndex: 3 },
+      options: {
+        subdomains: ["0", "1", "2", "3", "4", "5", "6", "7"],
+        transparent: true,
+        zIndex: 3,
+      },
     },
   },
   // OpenStreetMap
@@ -136,7 +148,10 @@ export default {
       const mapOptions = { ...defaultOptions, ...this.options };
       const { center, ...restOptions } = mapOptions;
 
-      this.map = L.map(this.mapId, restOptions).setView(center, mapOptions.zoom);
+      this.map = L.map(this.mapId, restOptions).setView(
+        center,
+        mapOptions.zoom
+      );
 
       // 添加底图
       this.setBasemap(this.basemap);
@@ -178,7 +193,10 @@ export default {
         if (annotationUrl.includes("{tk}")) {
           annotationUrl = annotationUrl.replace(/{tk}/g, this.tiandituToken);
         }
-        this.annotationLayer = L.tileLayer(annotationUrl, preset.annotation.options);
+        this.annotationLayer = L.tileLayer(
+          annotationUrl,
+          preset.annotation.options
+        );
         this.annotationLayer.addTo(this.map);
       }
     },
@@ -201,7 +219,11 @@ export default {
      */
     setCustomAnnotation(url, options = {}) {
       this.removeAnnotation();
-      this.annotationLayer = L.tileLayer(url, { transparent: true, zIndex: 3, ...options });
+      this.annotationLayer = L.tileLayer(url, {
+        transparent: true,
+        zIndex: 3,
+        ...options,
+      });
       this.annotationLayer.addTo(this.map);
     },
 
