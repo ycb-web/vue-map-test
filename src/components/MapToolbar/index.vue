@@ -124,33 +124,84 @@
       </div>
     </a-popover>
 
-    <!-- 工具箱按钮：触发 tools 事件，由父组件处理 -->
-    <div class="tool-item tool-text" title="工具箱" @click="handleTools">
-      <svg viewBox="0 0 24 24" width="18" height="18">
-        <rect
-          x="2"
-          y="7"
-          width="20"
-          height="14"
-          rx="2"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-        />
-        <path
-          d="M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-        />
-      </svg>
-      <span>工具</span>
-    </div>
+    <!-- 工具箱按钮：点击弹出测量工具选择面板 -->
+    <a-popover trigger="click" placement="bottom" v-model="toolsPopoverVisible">
+      <template slot="content">
+        <div class="tools-list">
+          <div
+            class="tools-item"
+            :class="{ active: currentTool === 'distance' }"
+            @click="startMeasureDistance"
+          >
+            <svg viewBox="0 0 24 24" width="20" height="20">
+              <path
+                d="M3 21L21 3M3 21l4-1-3-3 1-4M21 3l-4 1 3 3-1 4"
+                stroke="currentColor"
+                stroke-width="2"
+                fill="none"
+              />
+            </svg>
+            <span>测距</span>
+          </div>
+          <div
+            class="tools-item"
+            :class="{ active: currentTool === 'area' }"
+            @click="startMeasureArea"
+          >
+            <svg viewBox="0 0 24 24" width="20" height="20">
+              <polygon
+                points="4,4 20,4 20,20 4,20"
+                stroke="currentColor"
+                stroke-width="2"
+                fill="none"
+              />
+              <circle cx="4" cy="4" r="2" fill="currentColor" />
+              <circle cx="20" cy="4" r="2" fill="currentColor" />
+              <circle cx="20" cy="20" r="2" fill="currentColor" />
+              <circle cx="4" cy="20" r="2" fill="currentColor" />
+            </svg>
+            <span>测面</span>
+          </div>
+          <div class="tools-item" v-if="currentTool" @click="clearMeasure">
+            <svg viewBox="0 0 24 24" width="20" height="20">
+              <path
+                d="M18 6L6 18M6 6l12 12"
+                stroke="currentColor"
+                stroke-width="2"
+              />
+            </svg>
+            <span>清除</span>
+          </div>
+        </div>
+      </template>
+      <div class="tool-item tool-text" title="工具箱">
+        <svg viewBox="0 0 24 24" width="18" height="18">
+          <rect
+            x="2"
+            y="7"
+            width="20"
+            height="14"
+            rx="2"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          />
+          <path
+            d="M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          />
+        </svg>
+        <span>工具</span>
+      </div>
+    </a-popover>
   </div>
 </template>
 
 <script>
 import L from "leaflet";
+import DrawPlug from "@/utils/DrawPlug";
 
 export default {
   name: "MapToolbar",
@@ -234,6 +285,14 @@ export default {
       hasInitialized: false,
       // 底图选择弹窗是否可见
       basemapPopoverVisible: false,
+      // 工具箱弹窗是否可见
+      toolsPopoverVisible: false,
+      // 当前激活的测量工具：'distance' | 'area' | null
+      currentTool: null,
+      // 测量图层组
+      measureGroup: null,
+      // 测量工具实例
+      drawPlug: null,
     };
   },
 
@@ -293,10 +352,12 @@ export default {
       this.map.setView(this.initialCenter, this.initialZoom);
 
       // 找到 initSelect: true 的底图索引，没有则用第一个
-      let defaultIndex = this.basemaps.findIndex((item) => item.initSelect);
+      var defaultIndex = this.basemaps.findIndex(function (item) {
+        return item.initSelect;
+      });
       if (defaultIndex === -1) defaultIndex = 0;
 
-      const basemap = this.basemaps[defaultIndex];
+      var basemap = this.basemaps[defaultIndex];
       if (!basemap) return;
 
       // 添加底图瓦片图层
@@ -319,6 +380,13 @@ export default {
 
       this.currentBasemapIndex = defaultIndex;
       this.hasInitialized = true;
+
+      // 禁用双击缩放（避免与测量双击结束冲突）
+      this.map.doubleClickZoom.disable();
+
+      // 初始化测量图层组和工具
+      this.measureGroup = L.layerGroup().addTo(this.map);
+      this.drawPlug = new DrawPlug(this.map, this.measureGroup);
     },
 
     /**
@@ -338,7 +406,7 @@ export default {
      */
     handleFullscreen() {
       this.$emit("fullscreen");
-      const el = document.documentElement;
+      var el = document.documentElement;
       if (!document.fullscreenElement) {
         // 进入全屏
         if (el.requestFullscreen) {
@@ -398,7 +466,7 @@ export default {
       // 如果点击的是当前底图，不做处理
       if (!this.map || index === this.currentBasemapIndex) return;
 
-      const basemap = this.basemaps[index];
+      var basemap = this.basemaps[index];
       if (!basemap) return;
 
       // 移除旧的底图图层
@@ -433,7 +501,39 @@ export default {
       // 关闭弹窗
       this.basemapPopoverVisible = false;
       // 触发事件通知父组件
-      this.$emit("basemap-change", { index, basemap });
+      this.$emit("basemap-change", { index: index, basemap: basemap });
+    },
+
+    /**
+     * 开始测距
+     */
+    startMeasureDistance() {
+      this.toolsPopoverVisible = false;
+      this.currentTool = "distance";
+      if (this.drawPlug) {
+        this.drawPlug.startDrawLine();
+      }
+    },
+
+    /**
+     * 开始测面
+     */
+    startMeasureArea() {
+      this.toolsPopoverVisible = false;
+      this.currentTool = "area";
+      if (this.drawPlug) {
+        this.drawPlug.startDrawPolygon();
+      }
+    },
+
+    /**
+     * 清除测量结果
+     */
+    clearMeasure() {
+      this.currentTool = null;
+      if (this.drawPlug) {
+        this.drawPlug.clearLayer();
+      }
     },
   },
 };
@@ -546,5 +646,60 @@ export default {
   margin-top: 4px;
   font-size: 12px;
   color: #333;
+}
+
+/* 工具列表 */
+.tools-list {
+  display: flex;
+  gap: 10px;
+}
+
+/* 工具选项 */
+.tools-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  cursor: pointer;
+  padding: 8px 12px;
+  border-radius: 4px;
+  border: 2px solid transparent;
+  transition: all 0.2s;
+  min-width: 60px;
+}
+
+.tools-item:hover {
+  background: #f0f0f0;
+}
+
+.tools-item.active {
+  border-color: #ff4d4f;
+  background: #fff1f0;
+}
+
+.tools-item span {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #333;
+}
+</style>
+
+<style>
+/* 测量标签样式 */
+.measure-label-wrapper {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.measure-label {
+  color: #fff;
+  padding: 3px 8px;
+  border-radius: 3px;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  transform: translate(-50%, -50%);
+  position: absolute;
 }
 </style>

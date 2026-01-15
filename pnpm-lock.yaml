@@ -15,6 +15,7 @@ specifiers:
   vue: ^2.6.11
   vue-router: ^3.6.5
   vue-template-compiler: ^2.6.11
+  vuex: '3'
 
 dependencies:
   ant-design-vue: 1.7.8_kszqv4ntea7le2tfdnfsk4vbta
@@ -28,6 +29,7 @@ dependencies:
   underscore: 1.13.7
   vue: 2.7.16
   vue-router: 3.6.5_vue@2.7.16
+  vuex: 3.6.2_vue@2.7.16
 
 devDependencies:
   '@vue/cli-plugin-babel': 4.5.19_mpccfsq3i4hvd67k6ghxa53u7q
@@ -9416,6 +9418,14 @@ packages:
     dependencies:
       '@vue/compiler-sfc': 2.7.16
       csstype: 3.2.3
+
+  /vuex/3.6.2_vue@2.7.16:
+    resolution: {integrity: sha512-ETW44IqCgBpVomy520DT5jf8n0zoCac+sxWnn+hMe/CzaSejb/eVw2YToiXYX+Ex/AuHHia28vWTq4goAexFbw==}
+    peerDependencies:
+      vue: ^2.0.0
+    dependencies:
+      vue: 2.7.16
+    dev: false
 
   /warning/4.0.3:
     resolution: {integrity: sha512-rpJyN222KWIvHJ/F53XSZv0Zl/accqHR8et1kpaMTD/fLCRxtV8iX8czMzY7sVZupTI3zcUTg8eycS2kNF9l6w==}

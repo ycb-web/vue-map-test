@@ -1,5 +1,6 @@
 import Vue from "vue";
 import VueRouter from "vue-router";
+import TestPage from "../views/TestPage";
 import WindPage from "../views/WindPage.vue";
 import TyphoonPage from "../views/TyphoonPage.vue";
 import WmsPage from "../views/WmsPage.vue";
@@ -11,7 +12,12 @@ Vue.use(VueRouter);
 const routes = [
   {
     path: "/",
-    redirect: "/wind",
+    redirect: "/test",
+  },
+  {
+    path: "/test",
+    name: "Test",
+    component: TestPage,
   },
   {
     path: "/wind",

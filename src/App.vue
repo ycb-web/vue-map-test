@@ -1,6 +1,7 @@
 <template>
   <div id="app">
     <nav class="nav-bar">
+      <router-link to="/test" class="nav-link">测试</router-link>
       <router-link to="/wind" class="nav-link">风场</router-link>
       <router-link to="/typhoon" class="nav-link">台风</router-link>
       <router-link to="/wms" class="nav-link">wms</router-link>
