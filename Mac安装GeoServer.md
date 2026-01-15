@@ -1,8 +1,9 @@
 Mac 安装 GeoServer
 
 前置准备
+
 1. 安装 Java11 版本(Java 8 会报错)
-JDK 安装包地址推荐：https://www.azul.com/downloads/?version=java-8-lts&os=macos&package=jdk#zulu
+   JDK 安装包地址推荐：https://www.azul.com/downloads/?version=java-8-lts&os=macos&package=jdk#zulu
 
 ```bash
 # 验证是否安装成功
@@ -33,7 +34,8 @@ export CLASSPATH
 source ~/.bash_profile
 ```
 
-2. 安装GeoServer
+2. 安装 GeoServer
+
 ```bash
 # 创建安装目录
 mkdir -p ~/Applications/GeoServer
@@ -54,5 +56,3 @@ sh startup.sh
 # 访问
 http://localhost:8080/geoserver
 ```
-	
-
