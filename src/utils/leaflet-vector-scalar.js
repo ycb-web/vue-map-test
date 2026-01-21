@@ -81,7 +81,7 @@ L.CanvasLayer = (L.Layer ? L.Layer : L.Class).extend({
     var animated = this._map.options.zoomAnimation && L.Browser.any3d;
     L.DomUtil.addClass(
       this._canvas,
-      "leaflet-zoom-" + (animated ? "animated" : "hide")
+      "leaflet-zoom-" + (animated ? "animated" : "hide"),
     );
 
     var pane = this.options.pane;
@@ -131,7 +131,7 @@ L.CanvasLayer = (L.Layer ? L.Layer : L.Class).extend({
     var center = this._map.options.crs.project(this._map.getCenter());
 
     var corner = this._map.options.crs.project(
-      this._map.containerPointToLatLng(this._map.getSize())
+      this._map.containerPointToLatLng(this._map.getSize()),
     );
 
     var del = this._delegate || this;
@@ -165,7 +165,7 @@ L.CanvasLayer = (L.Layer ? L.Layer : L.Class).extend({
       ? this._map._latLngToNewLayerPoint(
           this._map.getBounds().getNorthWest(),
           e.zoom,
-          e.center
+          e.center,
         )
       : this._map
           ._getCenterOffset(e.center)
@@ -244,12 +244,12 @@ L.Control.Velocity = L.Control.extend({
     var self = this;
 
     var pos = this.options.leafletVelocity._map.containerPointToLatLng(
-      L.point(e.containerPoint.x, e.containerPoint.y)
+      L.point(e.containerPoint.x, e.containerPoint.y),
     );
 
     var gridValue = this.options.leafletVelocity._windy.interpolatePoint(
       pos.lng,
-      pos.lat
+      pos.lat,
     );
 
     var htmlOut = "";
@@ -268,7 +268,7 @@ L.Control.Velocity = L.Control.extend({
           .vectorToDegrees(
             gridValue[0],
             gridValue[1],
-            this.options.angleConvention
+            this.options.angleConvention,
           )
           .toFixed(2) +
         "°" +
@@ -372,7 +372,7 @@ L.ScalarLayer = (L.Layer ? L.Layer : L.Class).extend({
     if (options.hasOwnProperty("displayOptions")) {
       this.options.displayOptions = Object.assign(
         this.options.displayOptions,
-        options.displayOptions
+        options.displayOptions,
       );
 
       this._initMouseHandler(true);
@@ -394,7 +394,7 @@ L.ScalarLayer = (L.Layer ? L.Layer : L.Class).extend({
   _onMouseMove: function (e) {
     var self = this;
     var pos = self._map.containerPointToLatLng(
-      L.point(e.containerPoint.x, e.containerPoint.y)
+      L.point(e.containerPoint.x, e.containerPoint.y),
     );
     var gridValue = self._scalar.interpolatePoint(pos.lng, pos.lat);
     var htmlOut = gridValue ? gridValue.toFixed(2) : null;
@@ -434,7 +434,7 @@ L.ScalarLayer = (L.Layer ? L.Layer : L.Class).extend({
       [
         [bounds._southWest.lng, bounds._southWest.lat],
         [bounds._northEast.lng, bounds._northEast.lat],
-      ]
+      ],
     );
   },
   _initScalar: function _initScalar(self) {
@@ -444,7 +444,7 @@ L.ScalarLayer = (L.Layer ? L.Layer : L.Class).extend({
         canvas: self._canvasLayer._canvas,
         map: this._map,
       },
-      self.options
+      self.options,
     );
     this._scalar = new Scalar(options); // prepare context global var, start drawing
 
@@ -534,6 +534,7 @@ L.ScalarTileLayer = (L.GridLayer ? L.GridLayer : L.Class).extend({
     colorScale: null,
     data: null,
     opacity: 0.97,
+    overlayOpacity: 0.4, // 新增：颜色场透明度，可动态配置
     tileSize: 256,
   },
   _map: null,
@@ -571,7 +572,14 @@ L.ScalarTileLayer = (L.GridLayer ? L.GridLayer : L.Class).extend({
   _setupColorScale: function () {
     var MIN_VELOCITY_INTENSITY = this.options.minValue;
     var MAX_VELOCITY_INTENSITY = this.options.maxValue;
-    var OVERLAY_ALPHA = Math.floor(0.4 * 255);
+    // 新增：支持动态配置透明度
+    var overlayOpacity =
+      typeof this.options.overlayOpacity === "number"
+        ? this.options.overlayOpacity
+        : 0.4;
+    overlayOpacity = Math.max(0, Math.min(1, overlayOpacity));
+    var hasCustomColorScale = Array.isArray(this.options.colorScale);
+    var OVERLAY_ALPHA = Math.floor(overlayOpacity * 255);
     var TRANSPARENT_BLACK = [0, 0, 0, 0];
 
     var COLORSCALE = this.options.colorScale || [
@@ -588,9 +596,9 @@ L.ScalarTileLayer = (L.GridLayer ? L.GridLayer : L.Class).extend({
       [328, [144, 28, 79]],
     ];
 
-    if (!this.options.colorScale) {
+    if (!hasCustomColorScale) {
       var n = parseFloat(
-        ((MAX_VELOCITY_INTENSITY - MIN_VELOCITY_INTENSITY) / 10).toFixed(4)
+        ((MAX_VELOCITY_INTENSITY - MIN_VELOCITY_INTENSITY) / 10).toFixed(4),
       );
       var m = MIN_VELOCITY_INTENSITY;
 
@@ -608,7 +616,14 @@ L.ScalarTileLayer = (L.GridLayer ? L.GridLayer : L.Class).extend({
   setData: function setData(data) {
     this.options.data = data;
     this._processData();
-    this.redraw();
+
+    // 新增：高效瓦片刷新，避免完全重绘
+    if (this._map && this._tiles && Object.keys(this._tiles).length) {
+      this._refreshTiles();
+    } else {
+      this.redraw();
+    }
+
     this.fire("load");
   },
 
@@ -619,32 +634,98 @@ L.ScalarTileLayer = (L.GridLayer ? L.GridLayer : L.Class).extend({
     }
   },
 
+  // 新增：动态设置色阶
+  setColorScale: function setColorScale(colorScale) {
+    this.options.colorScale = colorScale;
+    this._setupColorScale();
+    this._refreshTiles();
+  },
+
+  // 新增：动态设置最小值
+  setMinValue: function setMinValue(minValue) {
+    this.options.minValue = minValue;
+    this._setupColorScale();
+    this._refreshTiles();
+  },
+
+  // 新增：动态设置最大值
+  setMaxValue: function setMaxValue(maxValue) {
+    this.options.maxValue = maxValue;
+    this._setupColorScale();
+    this._refreshTiles();
+  },
+
+  // 新增：动态设置颜色场透明度
+  setOverlayOpacity: function setOverlayOpacity(overlayOpacity) {
+    this.options.overlayOpacity = overlayOpacity;
+    this._setupColorScale();
+    this._refreshTiles();
+  },
+
   _processData: function () {
     if (!µ.isValue(this.options.data) || this.options.data.length === 0) {
-      // 使用 µ.isValue
       console.warn("数据为空，跳过处理");
       this._windData = null;
       this._header = null;
+      this._scalarHeader = null;
+      this._scalarGridBuilder = null;
       return;
     }
 
     var data = this.options.data;
     var currentWindData = null;
+    // 新增：智能识别 U/V 分量
+    var uComp = null;
+    var vComp = null;
+    var scalar = null;
 
-    if (data.length > 1) {
-      var data1 = data[0].data;
-      var data2 = data[1].data;
-      currentWindData = data1.map(function (v, i) {
-        return (Math.abs(v) + Math.abs(data2[i])) / 2;
+    data.forEach(function (record) {
+      switch (
+        record.header.parameterCategory +
+        "," +
+        record.header.parameterNumber
+      ) {
+        case "1,2":
+        case "0,2":
+        case "2,2":
+          uComp = record;
+          break;
+
+        case "1,3":
+        case "0,3":
+        case "2,3":
+          vComp = record;
+          break;
+
+        default:
+          scalar = record;
+      }
+    });
+
+    // 新增：正确计算矢量模 √(u² + v²)
+    if (uComp && vComp) {
+      this._header = uComp.header;
+      var uData = uComp.data;
+      var vData = vComp.data;
+      currentWindData = uData.map(function (u, i) {
+        var v = vData[i];
+        return Math.sqrt(u * u + v * v);
       });
     } else {
-      currentWindData = data[0].data.map(function (v) {
+      var record = scalar || uComp || vComp || data[0];
+      this._header = record.header;
+      currentWindData = record.data.map(function (v) {
         return Math.abs(v);
       });
     }
 
-    this._header = data[0].header;
     this._windData = currentWindData;
+    this._scalarHeader = this._header;
+    // 新增：创建插值器
+    this._scalarGridBuilder = this._createScalarGridBuilder(
+      this._scalarHeader,
+      this._windData,
+    );
 
     var Δλ = (this._header.lo2 - this._header.lo1) / (this._header.nx - 1);
     this._isContinuous = Math.floor(this._header.nx * Δλ) >= 360;
@@ -663,7 +744,7 @@ L.ScalarTileLayer = (L.GridLayer ? L.GridLayer : L.Class).extend({
     var ctx = tile.getContext("2d");
     var imgData = ctx.createImageData(
       this.options.tileSize,
-      this.options.tileSize
+      this.options.tileSize,
     );
     var data = imgData.data;
 
@@ -676,7 +757,7 @@ L.ScalarTileLayer = (L.GridLayer ? L.GridLayer : L.Class).extend({
         var gridIndex = this._latLngToWindGridIndex(
           latLng.lat,
           latLng.lon,
-          this._header
+          this._header,
         );
         var value = this._bilinearInterpolate(
           this._windData,
@@ -684,7 +765,7 @@ L.ScalarTileLayer = (L.GridLayer ? L.GridLayer : L.Class).extend({
           this._header.ny,
           gridIndex.fi,
           gridIndex.fj,
-          this._isContinuous
+          this._isContinuous,
         );
         var color = this._getColor(value);
         var idx = (j * this.options.tileSize + i) * 4;
@@ -710,8 +791,8 @@ L.ScalarTileLayer = (L.GridLayer ? L.GridLayer : L.Class).extend({
     var lon = ((coords.x + i / this.options.tileSize) / n) * 360 - 180;
     var latRad = Math.atan(
       Math.sinh(
-        Math.PI * (1 - (2 * (coords.y + j / this.options.tileSize)) / n)
-      )
+        Math.PI * (1 - (2 * (coords.y + j / this.options.tileSize)) / n),
+      ),
     );
     var lat = (latRad * 180) / Math.PI;
     return { lat: lat, lon: lon };
@@ -801,7 +882,7 @@ L.ScalarTileLayer = (L.GridLayer ? L.GridLayer : L.Class).extend({
     if (options.hasOwnProperty("displayOptions")) {
       this.options.displayOptions = Object.assign(
         this.options.displayOptions,
-        options.displayOptions
+        options.displayOptions,
       );
       this._initMouseHandler(true);
     }
@@ -822,14 +903,14 @@ L.ScalarTileLayer = (L.GridLayer ? L.GridLayer : L.Class).extend({
   _onMouseMove: function (e) {
     var self = this;
     var pos = self._map.containerPointToLatLng(
-      L.point(e.containerPoint.x, e.containerPoint.y)
+      L.point(e.containerPoint.x, e.containerPoint.y),
     );
 
     if (µ.isValue(this._windData) && µ.isValue(this._header)) {
       var gridIndex = this._latLngToWindGridIndex(
         pos.lat,
         pos.lng,
-        this._header
+        this._header,
       );
       var value = this._bilinearInterpolate(
         this._windData,
@@ -837,7 +918,7 @@ L.ScalarTileLayer = (L.GridLayer ? L.GridLayer : L.Class).extend({
         this._header.ny,
         gridIndex.fi,
         gridIndex.fj,
-        this._isContinuous
+        this._isContinuous,
       );
       var htmlOut = µ.isValue(value) ? value.toFixed(2) : null;
       console.log("当前的值是", htmlOut);
@@ -862,6 +943,136 @@ L.ScalarTileLayer = (L.GridLayer ? L.GridLayer : L.Class).extend({
       options["leafletVelocity"] = this;
       this._mouseControl = L.control.velocity(options).addTo(this._map);
     }
+  },
+
+  // 新增：高效刷新已有瓦片
+  _refreshTiles: function () {
+    if (!this._map || !this._tiles) {
+      return;
+    }
+
+    var self = this;
+    Object.keys(this._tiles).forEach(function (key) {
+      var tile = self._tiles[key];
+      if (!tile || !tile.el) {
+        return;
+      }
+      self._renderTile(tile.el, tile.coords);
+    });
+  },
+
+  // 新增：瓦片渲染方法，支持复用
+  _renderTile: function (canvas, coords) {
+    var ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, this.options.tileSize, this.options.tileSize);
+
+    if (!µ.isValue(this._windData) || !µ.isValue(this._header)) {
+      return;
+    }
+
+    var imgData = ctx.createImageData(
+      this.options.tileSize,
+      this.options.tileSize,
+    );
+    var data = imgData.data;
+
+    for (var j = 0; j < this.options.tileSize; j++) {
+      for (var i = 0; i < this.options.tileSize; i++) {
+        var latLng = this._tilePixelToLatLng(i, j, coords);
+        var value = null;
+        if (this._scalarGridBuilder) {
+          value = this._scalarGridBuilder.interpolate(latLng.lon, latLng.lat);
+        }
+        var color = this._getColor(value);
+        var idx = (j * this.options.tileSize + i) * 4;
+        data[idx] = color[0];
+        data[idx + 1] = color[1];
+        data[idx + 2] = color[2];
+        data[idx + 3] = color[3];
+      }
+    }
+
+    ctx.putImageData(imgData, 0, 0);
+  },
+
+  // 新增：创建标量网格插值器
+  _createScalarGridBuilder: function (header, scalarData) {
+    var lambda0 = header.lo1;
+    var phi0 = header.la1;
+    var deltaLambda = header.dx;
+    var deltaPhi = header.dy;
+    var ni = header.nx;
+    var nj = header.ny;
+
+    var grid = [];
+    var p = 0;
+    var isContinuous = Math.floor(ni * deltaLambda) >= 360;
+
+    for (var j = 0; j < nj; j++) {
+      var row = [];
+
+      for (var i = 0; i < ni; i++, p++) {
+        row[i] = scalarData[p];
+      }
+
+      if (isContinuous) {
+        row.push(row[0]);
+      }
+
+      grid[j] = row;
+    }
+
+    function interpolate(lon, lat) {
+      if (!grid) {
+        return null;
+      }
+
+      var i = µ.floorMod(lon - lambda0, 360) / deltaLambda;
+      var j = (phi0 - lat) / deltaPhi;
+
+      var fi = Math.floor(i);
+      var ci = fi + 1;
+      var fj = Math.floor(j);
+      var cj = fj + 1;
+      var row;
+
+      row = grid[fj];
+      if (!row) {
+        return null;
+      }
+
+      var g00 = row[fi];
+      var g10 = row[ci];
+
+      if (!µ.isValue(g00) || !µ.isValue(g10)) {
+        return null;
+      }
+
+      row = grid[cj];
+      if (!row) {
+        return null;
+      }
+
+      var g01 = row[fi];
+      var g11 = row[ci];
+
+      if (!µ.isValue(g01) || !µ.isValue(g11)) {
+        return null;
+      }
+
+      var rx = i - fi;
+      var ry = j - fj;
+      var a = (1 - rx) * (1 - ry);
+      var b = rx * (1 - ry);
+      var c = (1 - rx) * ry;
+      var d = rx * ry;
+
+      return g00 * a + g10 * b + g01 * c + g11 * d;
+    }
+
+    return {
+      interpolate: interpolate,
+    };
   },
 });
 
@@ -940,7 +1151,7 @@ L.VelocityLayer = (L.Layer ? L.Layer : L.Class).extend({
     if (options.hasOwnProperty("displayOptions")) {
       this.options.displayOptions = Object.assign(
         this.options.displayOptions,
-        options.displayOptions
+        options.displayOptions,
       );
 
       this._initMouseHandler(true);
@@ -964,7 +1175,7 @@ L.VelocityLayer = (L.Layer ? L.Layer : L.Class).extend({
   _onMouseMove: function (e) {
     var self = this;
     var pos = self._map.containerPointToLatLng(
-      L.point(e.containerPoint.x, e.containerPoint.y)
+      L.point(e.containerPoint.x, e.containerPoint.y),
     );
     var gridValue = self._windy.interpolatePoint(pos.lng, pos.lat);
     var htmlOut = self.vectorToSpeed(gridValue[0], gridValue[1]).toFixed(2);
@@ -1004,7 +1215,7 @@ L.VelocityLayer = (L.Layer ? L.Layer : L.Class).extend({
       [
         [bounds._southWest.lng, bounds._southWest.lat],
         [bounds._northEast.lng, bounds._northEast.lat],
-      ]
+      ],
     );
   },
   _initWindy: function _initWindy(self) {
@@ -1014,7 +1225,7 @@ L.VelocityLayer = (L.Layer ? L.Layer : L.Class).extend({
         canvas: self._canvasLayer._canvas,
         map: this._map,
       },
-      self.options
+      self.options,
     );
     this._windy = new Windy(options); // prepare context global var, start drawing
 
@@ -1210,7 +1421,7 @@ var µ = (function () {
 
   function isMobile() {
     return /android|blackberry|iemobile|ipad|iphone|ipod|opera mini|webos/i.test(
-      navigator.userAgent
+      navigator.userAgent,
     );
   }
 
@@ -1684,7 +1895,7 @@ var µ = (function () {
 
     var tokens =
       /^(current|(\d{4})\/(\d{1,2})\/(\d{1,2})\/(\d{3,4})Z)\/(\w+)\/(\w+)\/(\w+)([\/].+)?/.exec(
-        hash
+        hash,
       );
 
     if (tokens) {
@@ -1785,8 +1996,8 @@ var µ = (function () {
             parse(
               window.location.hash.substr(1) || DEFAULT_CONFIG,
               model._projectionNames,
-              model._overlayTypes
-            )
+              model._overlayTypes,
+            ),
           );
           break;
 
@@ -1916,7 +2127,7 @@ var Scalar = function Scalar(params) {
 
   var setColorScale = function setColorScale() {
     let n = parseFloat(
-        ((MAX_VELOCITY_INTENSITY - MIN_VELOCITY_INTENSITY) / 10).toFixed(4)
+        ((MAX_VELOCITY_INTENSITY - MIN_VELOCITY_INTENSITY) / 10).toFixed(4),
       ),
       m = MIN_VELOCITY_INTENSITY;
 
@@ -1965,7 +2176,7 @@ var Scalar = function Scalar(params) {
     g00,
     g10,
     g01,
-    g11
+    g11,
   ) {
     var rx = 1 - x;
     var ry = 1 - y;
@@ -2104,7 +2315,7 @@ var Scalar = function Scalar(params) {
 
   var isMobile = function isMobile() {
     return /android|blackberry|iemobile|ipad|iphone|ipod|opera mini|webos/i.test(
-      navigator.userAgent
+      navigator.userAgent,
     );
   }; //
 
@@ -2208,7 +2419,7 @@ var Scalar = function Scalar(params) {
     grid,
     bounds,
     extent,
-    callback
+    callback,
   ) {
     var columns = [];
     var x = bounds.x;
@@ -2298,7 +2509,7 @@ var Scalar = function Scalar(params) {
           // animate the canvas with random points
           // strength.field = field;
           // animate(bounds, field);
-        }
+        },
       );
     });
   };
@@ -2407,7 +2618,7 @@ var Windy = function Windy(params) {
     g00,
     g10,
     g01,
-    g11
+    g11,
   ) {
     var rx = 1 - x;
     var ry = 1 - y;
@@ -2477,7 +2688,7 @@ var Windy = function Windy(params) {
 
     if (!supported) {
       console.log(
-        "Windy Error: Only data with Latitude_Longitude coordinates is supported"
+        "Windy Error: Only data with Latitude_Longitude coordinates is supported",
       );
     }
 
@@ -2508,7 +2719,7 @@ var Windy = function Windy(params) {
         console.log(
           "Windy Error: Data with scanMode: " +
             header.scanMode +
-            " is not supported."
+            " is not supported.",
         );
     }
 
@@ -2604,7 +2815,7 @@ var Windy = function Windy(params) {
 
   var isMobile = function isMobile() {
     return /android|blackberry|iemobile|ipad|iphone|ipod|opera mini|webos/i.test(
-      navigator.userAgent
+      navigator.userAgent,
     );
   };
   /**
@@ -2712,7 +2923,7 @@ var Windy = function Windy(params) {
     grid,
     bounds,
     extent,
-    callback
+    callback,
   ) {
     var projection = {}; // map.crs used instead
 
@@ -2773,8 +2984,8 @@ var Windy = function Windy(params) {
           0,
           Math.min(
             colorScale.length - 1,
-            Math.round(((m - min) / (max - min)) * (colorScale.length - 1))
-          )
+            Math.round(((m - min) / (max - min)) * (colorScale.length - 1)),
+          ),
         );
       };
 
@@ -2783,13 +2994,13 @@ var Windy = function Windy(params) {
 
     var colorStyles = windIntensityColorScale(
       MIN_VELOCITY_INTENSITY,
-      MAX_VELOCITY_INTENSITY
+      MAX_VELOCITY_INTENSITY,
     );
     var buckets = colorStyles.map(function () {
       return [];
     });
     var particleCount = Math.round(
-      bounds.width * bounds.height * PARTICLE_MULTIPLIER
+      bounds.width * bounds.height * PARTICLE_MULTIPLIER,
     );
 
     if (isMobile()) {
@@ -2803,7 +3014,7 @@ var Windy = function Windy(params) {
       particles.push(
         field.randomize({
           age: Math.floor(Math.random() * MAX_PARTICLE_AGE) + 0,
-        })
+        }),
       );
     }
 
@@ -2909,7 +3120,7 @@ var Windy = function Windy(params) {
           // animate the canvas with random points
           // windy.field = field;
           animate(bounds, field);
-        }
+        },
       );
     });
   };
@@ -2942,6 +3153,10 @@ L.VectorArrowLayer = L.CanvasLayer.extend({
     color: "#ffffff",
     arrowSize: 20,
     gridSize: 50,
+    getColor: null, // 新增：动态颜色回调 function(speed) => color
+    getSize: null, // 新增：动态大小回调 function(speed) => size
+    alignToGrid: false, // 新增：是否对齐数据网格
+    autoGridZoom: null, // 新增：自动切换网格对齐的缩放级别
   },
   initialize: function (options) {
     L.CanvasLayer.prototype.initialize.call(this, options);
@@ -2964,6 +3179,7 @@ L.VectorArrowLayer = L.CanvasLayer.extend({
     var width = info.canvas.width;
     var height = info.canvas.height;
     var map = info.layer._map;
+    var zoom = map && map.getZoom ? map.getZoom() : null;
 
     var gridSize = this.options.gridSize;
 
@@ -2975,48 +3191,106 @@ L.VectorArrowLayer = L.CanvasLayer.extend({
     var dx = (header.lo2 - header.lo1) / (header.nx - 1);
     var dy = (header.la2 - header.la1) / (header.ny - 1);
 
-    for (var x = gridSize / 2; x < width; x += gridSize) {
-      for (var y = gridSize / 2; y < height; y += gridSize) {
-        var latlng = map.containerPointToLatLng(L.point(x, y));
+    // 新增：判断是否使用网格对齐模式
+    var useGridAlign = false;
+    if (this.options.alignToGrid) {
+      useGridAlign = true;
+    } else if (
+      typeof this.options.autoGridZoom === "number" &&
+      zoom !== null &&
+      zoom >= this.options.autoGridZoom
+    ) {
+      useGridAlign = true;
+    }
 
-        var lon = latlng.lng;
-        var lat = latlng.lat;
+    if (useGridAlign) {
+      // 新增：网格对齐模式 - 在数据网格中心点绘制箭头
+      for (var i = 0; i < header.nx - 1; i++) {
+        for (var j = 0; j < header.ny - 1; j++) {
+          var lon = header.lo1 + (i + 0.5) * dx;
+          var lat = header.la1 + (j + 0.5) * dy;
 
-        var hLon = lon;
-        if (header.lo1 >= 0 && hLon < 0) hLon += 360;
+          var adjustedLon = lon > 180 ? lon - 360 : lon;
 
-        var fi = (hLon - header.lo1) / dx;
-        var fj = (lat - header.la1) / dy;
+          var point = map.latLngToContainerPoint(L.latLng(lat, adjustedLon));
 
-        if (fi >= 0 && fi <= header.nx - 1 && fj >= 0 && fj <= header.ny - 1) {
-          var i = Math.floor(fi);
-          var j = Math.floor(fj);
-          var x_f = fi - i;
-          var y_f = fj - j;
+          if (
+            point.x < 0 ||
+            point.x > width ||
+            point.y < 0 ||
+            point.y > height
+          ) {
+            continue;
+          }
 
           var idx = j * header.nx + i;
-          if (i < header.nx - 1 && j < header.ny - 1) {
-            var u00 = this.uData[idx],
-              u10 = this.uData[idx + 1],
-              u01 = this.uData[idx + header.nx],
-              u11 = this.uData[idx + header.nx + 1];
-            var v00 = this.vData[idx],
-              v10 = this.vData[idx + 1],
-              v01 = this.vData[idx + header.nx],
-              v11 = this.vData[idx + header.nx + 1];
+          var u00 = this.uData[idx];
+          var u10 = this.uData[idx + 1];
+          var u01 = this.uData[idx + header.nx];
+          var u11 = this.uData[idx + header.nx + 1];
+          var v00 = this.vData[idx];
+          var v10 = this.vData[idx + 1];
+          var v01 = this.vData[idx + header.nx];
+          var v11 = this.vData[idx + header.nx + 1];
 
-            var u =
-              u00 * (1 - x_f) * (1 - y_f) +
-              u10 * x_f * (1 - y_f) +
-              u01 * (1 - x_f) * y_f +
-              u11 * x_f * y_f;
-            var v =
-              v00 * (1 - x_f) * (1 - y_f) +
-              v10 * x_f * (1 - y_f) +
-              v01 * (1 - x_f) * y_f +
-              v11 * x_f * y_f;
+          var u = (u00 + u10 + u01 + u11) * 0.25;
+          var v = (v00 + v10 + v01 + v11) * 0.25;
 
-            this._drawArrow(ctx, x, y, u, v);
+          if (u !== undefined && v !== undefined) {
+            this._drawArrow(ctx, point.x, point.y, u, v);
+          }
+        }
+      }
+    } else {
+      // 原有模式：屏幕网格采样
+      for (var x = gridSize / 2; x < width; x += gridSize) {
+        for (var y = gridSize / 2; y < height; y += gridSize) {
+          var latlng = map.containerPointToLatLng(L.point(x, y));
+
+          var lon = latlng.lng;
+          var lat = latlng.lat;
+
+          var hLon = lon;
+          if (header.lo1 >= 0 && hLon < 0) hLon += 360;
+
+          var fi = (hLon - header.lo1) / dx;
+          var fj = (lat - header.la1) / dy;
+
+          if (
+            fi >= 0 &&
+            fi <= header.nx - 1 &&
+            fj >= 0 &&
+            fj <= header.ny - 1
+          ) {
+            var i = Math.floor(fi);
+            var j = Math.floor(fj);
+            var x_f = fi - i;
+            var y_f = fj - j;
+
+            var idx = j * header.nx + i;
+            if (i < header.nx - 1 && j < header.ny - 1) {
+              var u00 = this.uData[idx],
+                u10 = this.uData[idx + 1],
+                u01 = this.uData[idx + header.nx],
+                u11 = this.uData[idx + header.nx + 1];
+              var v00 = this.vData[idx],
+                v10 = this.vData[idx + 1],
+                v01 = this.vData[idx + header.nx],
+                v11 = this.vData[idx + header.nx + 1];
+
+              var u =
+                u00 * (1 - x_f) * (1 - y_f) +
+                u10 * x_f * (1 - y_f) +
+                u01 * (1 - x_f) * y_f +
+                u11 * x_f * y_f;
+              var v =
+                v00 * (1 - x_f) * (1 - y_f) +
+                v10 * x_f * (1 - y_f) +
+                v01 * (1 - x_f) * y_f +
+                v11 * x_f * y_f;
+
+              this._drawArrow(ctx, x, y, u, v);
+            }
           }
         }
       }
@@ -3024,23 +3298,45 @@ L.VectorArrowLayer = L.CanvasLayer.extend({
   },
   _drawArrow: function (ctx, x, y, u, v) {
     var speed = Math.sqrt(u * u + v * v);
-    if (speed < 0.5) return;
+    if (speed < 0.01) return;
 
-    var angle = Math.atan2(-v, u);
+    var angle = Math.atan2(v, -u);
 
     var len = this.options.arrowSize;
+    // 新增：支持动态大小
+    if (typeof this.options.getSize === "function") {
+      var dynamicSize = this.options.getSize(speed);
+      if (typeof dynamicSize === "number" && dynamicSize > 0) {
+        len = dynamicSize;
+      }
+    }
+
+    var headLength = Math.max(4, len * 0.3);
+    var shaftLength = Math.max(4, len - headLength);
+    var halfShaft = shaftLength / 2;
+
+    // 新增：支持动态颜色
+    var strokeColor = this.options.color;
+    if (typeof this.options.getColor === "function") {
+      var dynamicColor = this.options.getColor(speed);
+      if (dynamicColor) {
+        strokeColor = dynamicColor;
+      }
+    }
 
     ctx.save();
+    ctx.strokeStyle = strokeColor;
+    ctx.fillStyle = strokeColor;
     ctx.translate(x, y);
     ctx.rotate(angle);
 
     ctx.beginPath();
-    ctx.moveTo(-len / 2, 0);
-    ctx.lineTo(len / 2, 0);
-    ctx.moveTo(len / 2, 0);
-    ctx.lineTo(len / 2 - 4, -3);
-    ctx.moveTo(len / 2, 0);
-    ctx.lineTo(len / 2 - 4, 3);
+    ctx.moveTo(-halfShaft, 0);
+    ctx.lineTo(halfShaft, 0);
+    ctx.moveTo(halfShaft, 0);
+    ctx.lineTo(halfShaft - headLength, -headLength * 0.75);
+    ctx.moveTo(halfShaft, 0);
+    ctx.lineTo(halfShaft - headLength, headLength * 0.75);
     ctx.stroke();
 
     ctx.restore();
