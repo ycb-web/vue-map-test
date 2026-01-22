@@ -5,6 +5,9 @@ node_modules
 .svn
 dist.zip
 
+# 大型数据文件
+src/assets/winJson/
+
 # local env files
 .env.local
 .env.*.local

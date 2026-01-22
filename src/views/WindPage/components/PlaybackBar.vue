@@ -89,6 +89,13 @@
             :style="{ width: segmentWidth + '%', backgroundColor: seg.color }"
           ></div>
         </div>
+        <!-- 轨道内部分割线，每6小时一条 -->
+        <div
+          v-for="(div, i) in trackDividers"
+          :key="'div-' + i"
+          class="track-divider"
+          :style="{ left: div.position + '%' }"
+        ></div>
       </div>
 
       <!-- 
@@ -353,18 +360,41 @@ export default {
 
     /**
      * 时间刻度数据
-     * 按一定间隔生成时间刻度，避免过于密集
+     * 每6小时显示一次：00时、06时、12时、18时
      * @returns {Array<{label: String, position: Number}>}
      */
     timeTicks() {
-      // 计算刻度间隔，确保大约显示12个刻度
-      const step = Math.max(1, Math.floor(this.total / 12));
       const arr = [];
-      for (let i = 0; i < this.total; i += step) {
-        arr.push({
-          label: (this.availableTimes[i] || "").replace(":00", "时"),
-          position: ((i + 0.5) / this.total) * 100,
-        });
+      for (let i = 0; i < this.total; i++) {
+        const time = this.availableTimes[i] || "";
+        const hour = parseInt(time.split(":")[0], 10);
+        // 只在 0, 6, 12, 18 时显示刻度
+        if (hour % 6 === 0) {
+          arr.push({
+            label: String(hour).padStart(2, "0") + "时",
+            position: ((i + 0.5) / this.total) * 100,
+          });
+        }
+      }
+      return arr;
+    },
+
+    /**
+     * 轨道内部分割线位置
+     * 每6小时一条分割线
+     * @returns {Array<{position: Number}>}
+     */
+    trackDividers() {
+      const arr = [];
+      for (let i = 0; i < this.total; i++) {
+        const time = this.availableTimes[i] || "";
+        const hour = parseInt(time.split(":")[0], 10);
+        // 在 0, 6, 12, 18 时添加分割线（跳过第一个）
+        if (hour % 6 === 0 && i > 0) {
+          arr.push({
+            position: (i / this.total) * 100,
+          });
+        }
       }
       return arr;
     },
@@ -653,6 +683,14 @@ export default {
 .segment {
   height: 100%;
   flex-shrink: 0;
+}
+.track-divider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(0, 0, 0, 0.3);
+  pointer-events: none;
 }
 .slider-thumb {
   position: absolute;
