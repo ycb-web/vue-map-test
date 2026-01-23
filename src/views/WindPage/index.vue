@@ -23,7 +23,7 @@
     <MapToolbar class="toolbar" :map="map" @reset-view="resetView" />
 
     <!-- ECharts图表容器 -->
-    <div class="chart-container" id="chart"></div>
+    <div v-if="showChart" class="chart-container" id="chart"></div>
 
     <!-- 
       播放轴组件
@@ -171,6 +171,20 @@
             </label>
           </div>
         </div>
+
+        <!-- 单点过程线 -->
+        <div class="control-section">
+          <div class="control-item">
+            <label>
+              <input
+                type="checkbox"
+                v-model="showChart"
+                @change="toggleChart"
+              />
+              单点过程线
+            </label>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -179,12 +193,18 @@
 <script>
 import L from "leaflet";
 import "@/utils/leaflet-vector-scalar";
-import windData from "@/assets/wind.json";
 import chartData from "@/assets/chartData.json";
 import * as echarts from "echarts";
 import { getProcessLineOption } from "@/utils/getProcessLineOption";
 import MapToolbar from "@/components/MapToolbar";
 import PlaybackBar from "./components/PlaybackBar.vue";
+
+// 导入5天的风场数据
+import windData0122 from "@/assets/winJson/wind_parsed_20260122000000.json";
+import windData0123 from "@/assets/winJson/wind_parsed_20260123000000.json";
+import windData0124 from "@/assets/winJson/wind_parsed_20260124000000.json";
+import windData0125 from "@/assets/winJson/wind_parsed_20260125000000.json";
+import windData0126 from "@/assets/winJson/wind_parsed_20260126000000.json";
 
 /**
  * WindPage 风场可视化页面组件
@@ -216,6 +236,8 @@ export default {
       showArrow: false,
       /** 是否显示风杆图层 */
       showBarb: false,
+      /** 是否显示单点过程线图表 */
+      showChart: false,
 
       // ========== 图层实例 ==========
       /** ECharts图表实例 */
@@ -251,6 +273,18 @@ export default {
       /** 箭头网格间距（像素） */
       arrowGridSize: 40,
 
+      // ========== 风场数据 ==========
+      /** 5天的风场数据数组，每天一份 */
+      windDataList: [
+        windData0122,
+        windData0123,
+        windData0124,
+        windData0125,
+        windData0126,
+      ],
+      /** 当前显示的风场数据 */
+      currentWindData: windData0122,
+
       // ========== 播放轴相关 ==========
       /** 播放状态 */
       playing: false,
@@ -282,7 +316,8 @@ export default {
   },
   mounted() {
     this.initMap();
-    this.initChart();
+    // 图表默认关闭，不自动初始化
+    // if (this.showChart) this.initChart();
   },
 
   beforeDestroy() {
@@ -363,16 +398,42 @@ export default {
     /**
      * 播放进度变化处理
      * 当用户拖拽滑块或自动播放时触发
-     * @param {Number} progress - 当前时间点索引
+     * 根据当前时间点索引切换对应的风场数据
+     * @param {Number} progress - 当前时间点索引 (0-119)
      */
     handleProgressChange(progress) {
-      console.log(
-        "时间进度变化:",
-        progress,
-        "当前时间:",
-        this.availableTimes[progress],
-      );
-      // TODO: 在这里可以根据时间点加载对应的风场数据
+      // 计算当前是第几天 (0-4)
+      const dayIndex = Math.floor(progress / 24);
+      const newWindData = this.windDataList[dayIndex];
+
+      // 只有当天数变化时才更新风场数据
+      if (newWindData !== this.currentWindData) {
+        this.currentWindData = newWindData;
+        this.updateWindLayers();
+        console.log("切换风场数据: 第", dayIndex + 1, "天");
+      }
+    },
+
+    /**
+     * 更新所有风场图层的数据
+     */
+    updateWindLayers() {
+      // 更新颜色图层
+      if (this.tileScalarLayer) {
+        this.tileScalarLayer.setData(this.currentWindData);
+      }
+      // 更新粒子图层
+      if (this.velocityLayer) {
+        this.velocityLayer.setData(this.currentWindData);
+      }
+      // 更新箭头图层
+      if (this.arrowLayer) {
+        this.arrowLayer.setData(this.currentWindData);
+      }
+      // 更新风杆图层
+      if (this.barbLayer) {
+        this.barbLayer.setData(this.currentWindData);
+      }
     },
 
     // ==========================================
@@ -418,6 +479,7 @@ export default {
         zoomAnimation: true,
       });
 
+      // 只初始化颜色图层和粒子图层
       if (this.showScalar) this.addScalarLayer();
       if (this.showVector) this.addVectorLayer();
     },
@@ -433,7 +495,7 @@ export default {
       };
       this.tileScalarLayer = L.scalarTileLayer(config);
       this.tileScalarLayer.addTo(this.map);
-      this.tileScalarLayer.setData(windData);
+      this.tileScalarLayer.setData(this.currentWindData);
     },
 
     /**
@@ -481,7 +543,7 @@ export default {
         },
         ...options,
       });
-      this.velocityLayer.setData(windData);
+      this.velocityLayer.setData(this.currentWindData);
       this.velocityLayer.onAdd(this.map);
     },
 
@@ -514,7 +576,7 @@ export default {
         alignToGrid: this.arrowAlignToGrid,
       });
       this.arrowLayer.addTo(this.map);
-      this.arrowLayer.setData(windData);
+      this.arrowLayer.setData(this.currentWindData);
     },
 
     /**
@@ -540,7 +602,7 @@ export default {
         gridSize: 60,
       });
       this.barbLayer.addTo(this.map);
-      this.barbLayer.setData(windData);
+      this.barbLayer.setData(this.currentWindData);
     },
 
     /**
@@ -560,10 +622,20 @@ export default {
      */
     toggleVector() {
       if (this.showVector) {
-        this.addVectorLayer();
+        try {
+          this.addVectorLayer();
+        } catch (error) {
+          console.error("粒子图层加载失败，数据格式可能不兼容:", error);
+          this.showVector = false;
+          alert("粒子图层暂不支持当前数据格式");
+        }
       } else if (this.velocityLayer) {
-        this.velocityLayer.onRemove(this.map);
-        this.velocityLayer = null;
+        try {
+          this.velocityLayer.onRemove(this.map);
+          this.velocityLayer = null;
+        } catch (error) {
+          console.error("粒子图层移除失败:", error);
+        }
       }
     },
 
@@ -588,6 +660,20 @@ export default {
       } else if (this.barbLayer) {
         this.map.removeLayer(this.barbLayer);
         this.barbLayer = null;
+      }
+    },
+
+    /**
+     * 切换单点过程线图表显示
+     */
+    toggleChart() {
+      if (this.showChart) {
+        this.$nextTick(() => {
+          this.initChart();
+        });
+      } else if (this.chart) {
+        this.chart.dispose();
+        this.chart = null;
       }
     },
 
@@ -706,8 +792,15 @@ label {
   align-items: center;
   color: #333;
 }
+label.disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
 input[type="checkbox"] {
   margin-right: 8px;
+}
+input[type="checkbox"]:disabled {
+  cursor: not-allowed;
 }
 .sub-controls {
   margin-top: 8px;
