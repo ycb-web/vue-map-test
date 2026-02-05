@@ -199,12 +199,14 @@ import { getProcessLineOption } from "@/utils/getProcessLineOption";
 import MapToolbar from "@/components/MapToolbar";
 import PlaybackBar from "./components/PlaybackBar.vue";
 
-// 导入5天的风场数据
-import windData0122 from "@/assets/winJson/wind_parsed_20260122000000.json";
-import windData0123 from "@/assets/winJson/wind_parsed_20260123000000.json";
-import windData0124 from "@/assets/winJson/wind_parsed_20260124000000.json";
-import windData0125 from "@/assets/winJson/wind_parsed_20260125000000.json";
-import windData0126 from "@/assets/winJson/wind_parsed_20260126000000.json";
+// 风场数据文件路径（放在 public 目录，通过 HTTP 请求加载）
+const WIND_DATA_FILES = [
+  "/data/winJson/wind_parsed_20260122000000.json",
+  "/data/winJson/wind_parsed_20260123000000.json",
+  "/data/winJson/wind_parsed_20260124000000.json",
+  "/data/winJson/wind_parsed_20260125000000.json",
+  "/data/winJson/wind_parsed_20260126000000.json",
+];
 
 /**
  * WindPage 风场可视化页面组件
@@ -274,16 +276,12 @@ export default {
       arrowGridSize: 40,
 
       // ========== 风场数据 ==========
-      /** 5天的风场数据数组，每天一份 */
-      windDataList: [
-        windData0122,
-        windData0123,
-        windData0124,
-        windData0125,
-        windData0126,
-      ],
+      /** 5天的风场数据数组，每天一份（动态加载） */
+      windDataList: [null, null, null, null, null],
       /** 当前显示的风场数据 */
-      currentWindData: windData0122,
+      currentWindData: null,
+      /** 数据加载状态 */
+      dataLoading: false,
 
       // ========== 播放轴相关 ==========
       /** 播放状态 */
@@ -316,6 +314,8 @@ export default {
   },
   mounted() {
     this.initMap();
+    // 加载第一天的风场数据
+    this.loadWindData(0);
     // 图表默认关闭，不自动初始化
     // if (this.showChart) this.initChart();
   },
@@ -396,6 +396,33 @@ export default {
     // ==========================================
 
     /**
+     * 加载指定天数的风场数据
+     * @param {Number} dayIndex - 天数索引 (0-4)
+     */
+    async loadWindData(dayIndex) {
+      // 如果已经加载过，直接使用缓存
+      if (this.windDataList[dayIndex]) {
+        this.currentWindData = this.windDataList[dayIndex];
+        this.updateWindLayers();
+        return;
+      }
+
+      this.dataLoading = true;
+      try {
+        const response = await fetch(WIND_DATA_FILES[dayIndex]);
+        const data = await response.json();
+        this.windDataList[dayIndex] = data;
+        this.currentWindData = data;
+        this.updateWindLayers();
+        console.log("加载风场数据成功: 第", dayIndex + 1, "天");
+      } catch (error) {
+        console.error("加载风场数据失败:", error);
+      } finally {
+        this.dataLoading = false;
+      }
+    },
+
+    /**
      * 播放进度变化处理
      * 当用户拖拽滑块或自动播放时触发
      * 根据当前时间点索引切换对应的风场数据
@@ -404,13 +431,11 @@ export default {
     handleProgressChange(progress) {
       // 计算当前是第几天 (0-4)
       const dayIndex = Math.floor(progress / 24);
-      const newWindData = this.windDataList[dayIndex];
+      const cachedData = this.windDataList[dayIndex];
 
       // 只有当天数变化时才更新风场数据
-      if (newWindData !== this.currentWindData) {
-        this.currentWindData = newWindData;
-        this.updateWindLayers();
-        console.log("切换风场数据: 第", dayIndex + 1, "天");
+      if (cachedData !== this.currentWindData) {
+        this.loadWindData(dayIndex);
       }
     },
 
@@ -418,13 +443,23 @@ export default {
      * 更新所有风场图层的数据
      */
     updateWindLayers() {
-      // 更新颜色图层
-      if (this.tileScalarLayer) {
-        this.tileScalarLayer.setData(this.currentWindData);
+      if (!this.currentWindData) return;
+
+      // 更新或创建颜色图层
+      if (this.showScalar) {
+        if (this.tileScalarLayer) {
+          this.tileScalarLayer.setData(this.currentWindData);
+        } else {
+          this.addScalarLayer();
+        }
       }
-      // 更新粒子图层
-      if (this.velocityLayer) {
-        this.velocityLayer.setData(this.currentWindData);
+      // 更新或创建粒子图层
+      if (this.showVector) {
+        if (this.velocityLayer) {
+          this.velocityLayer.setData(this.currentWindData);
+        } else {
+          this.addVectorLayer();
+        }
       }
       // 更新箭头图层
       if (this.arrowLayer) {
@@ -479,9 +514,7 @@ export default {
         zoomAnimation: true,
       });
 
-      // 只初始化颜色图层和粒子图层
-      if (this.showScalar) this.addScalarLayer();
-      if (this.showVector) this.addVectorLayer();
+      // 图层在数据加载完成后由 updateWindLayers 初始化
     },
 
     /**
