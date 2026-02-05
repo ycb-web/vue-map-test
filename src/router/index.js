@@ -7,6 +7,7 @@ import WmsPage from "../views/WmsPage.vue";
 import ContourPage from "../views/ContourPage.vue";
 import EditPage from "../views/EditPage.vue";
 import PlaygroundPage from "../views/PlaygroundPage";
+import LeaderLinePage from "../views/LeaderLinePage";
 
 Vue.use(VueRouter);
 
@@ -49,6 +50,11 @@ const routes = [
     path: "/edit",
     name: "Edit",
     component: EditPage,
+  },
+  {
+    path: "/leader",
+    name: "LeaderLine",
+    component: LeaderLinePage,
   },
 ];
 
