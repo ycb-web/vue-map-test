@@ -6,6 +6,7 @@ import TyphoonPage from "../views/TyphoonPage.vue";
 import WmsPage from "../views/WmsPage.vue";
 import ContourPage from "../views/ContourPage.vue";
 import EditPage from "../views/EditPage.vue";
+import PlaygroundPage from "../views/PlaygroundPage";
 
 Vue.use(VueRouter);
 
@@ -13,6 +14,11 @@ const routes = [
   {
     path: "/",
     redirect: "/test",
+  },
+  {
+    path: "/playground",
+    name: "Playground",
+    component: PlaygroundPage,
   },
   {
     path: "/test",
