@@ -11,7 +11,9 @@
       <router-link to="/playground" class="nav-link playground-link">🎮 演练场</router-link>
     </nav>
     <div class="page-container">
-      <router-view />
+      <keep-alive>
+        <router-view />
+      </keep-alive>
     </div>
   </div>
 </template>

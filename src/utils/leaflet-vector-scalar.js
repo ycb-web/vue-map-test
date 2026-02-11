@@ -121,6 +121,7 @@ L.CanvasLayer = (L.Layer ? L.Layer : L.Class).extend({
   },
   //------------------------------------------------------------------------------
   drawLayer: function drawLayer() {
+    if (!this._map) return; // 图层已移除，不再绑制
     // -- todo make the viewInfo properties  flat objects.
     var size = this._map.getSize();
 
@@ -3434,4 +3435,645 @@ L.VectorBarbLayer = L.VectorArrowLayer.extend({
 
 L.vectorBarbLayer = function (options) {
   return new L.VectorBarbLayer(options);
+};
+
+/**
+ * L.VectorWaveLayer - 浪效果网格波纹符号图层
+ * 在网格点上绘制带动画的 ～ 波纹符号
+ */
+L.VectorWaveLayer = L.CanvasLayer.extend({
+  options: {
+    color: "rgba(255, 255, 255, 0.85)",
+    gridSize: 35,
+    waveWidth: 14,
+    waveAmplitude: 2.5,
+    waveCount: 2,
+    lineWidth: 1.5,
+    minSpeed: 0.5,
+    dynamicSize: true,
+    driftSpeed: 15, // 漂移速度（像素/秒）
+  },
+  initialize: function (options) {
+    L.CanvasLayer.prototype.initialize.call(this, options);
+    L.setOptions(this, options);
+    this._animFrame = null;
+    this._phase = 0;
+    this._lastTime = 0;
+    this._wavePoints = []; // 缓存网格采样结果
+  },
+  setData: function (data) {
+    this.data = data;
+    if (data && data.length >= 2) {
+      this.header = data[0].header;
+      this.uData = data[0].data;
+      this.vData = data[1].data;
+    }
+    this._wavePoints = []; // 清除缓存，下次绘制时重新采样
+    this.needRedraw();
+  },
+  onAdd: function (map) {
+    L.CanvasLayer.prototype.onAdd.call(this, map);
+    this._startAnimation();
+  },
+  onRemove: function (map) {
+    this._stopAnimation();
+    L.CanvasLayer.prototype.onRemove.call(this, map);
+  },
+  _startAnimation: function () {
+    this._lastTime = performance.now();
+    var self = this;
+    function loop(now) {
+      var dt = (now - self._lastTime) / 1000;
+      self._lastTime = now;
+      self._phase += dt * self.options.driftSpeed;
+      self.needRedraw();
+      self._animFrame = requestAnimationFrame(loop);
+    }
+    this._animFrame = requestAnimationFrame(loop);
+  },
+  _stopAnimation: function () {
+    if (this._animFrame) {
+      cancelAnimationFrame(this._animFrame);
+      this._animFrame = null;
+    }
+  },
+  // 地图移动/缩放后清除缓存重新采样
+  _onLayerDidMove: function () {
+    this._wavePoints = [];
+    L.CanvasLayer.prototype._onLayerDidMove.call(this);
+  },
+  onDrawLayer: function (info) {
+    var ctx = info.canvas.getContext("2d");
+    ctx.clearRect(0, 0, info.canvas.width, info.canvas.height);
+    if (!this.uData || !this.vData || !this.header) return;
+
+    var map = info.layer._map;
+    var width = info.canvas.width;
+    var height = info.canvas.height;
+    var gridSize = this.options.gridSize;
+    var header = this.header;
+    var dx = (header.lo2 - header.lo1) / (header.nx - 1);
+    var dy = (header.la2 - header.la1) / (header.ny - 1);
+    var phase = this._phase;
+
+    // 如果没有缓存，重新采样网格
+    if (!this._wavePoints.length) {
+      for (var x = gridSize / 2; x < width; x += gridSize) {
+        for (var y = gridSize / 2; y < height; y += gridSize) {
+          var latlng = map.containerPointToLatLng(L.point(x, y));
+          var lon = latlng.lng;
+          var lat = latlng.lat;
+          var hLon = lon;
+          if (header.lo1 >= 0 && hLon < 0) hLon += 360;
+
+          var fi = (hLon - header.lo1) / dx;
+          var fj = (lat - header.la1) / dy;
+
+          if (
+            fi >= 0 &&
+            fi <= header.nx - 1 &&
+            fj >= 0 &&
+            fj <= header.ny - 1
+          ) {
+            var i = Math.floor(fi);
+            var j = Math.floor(fj);
+            var x_f = fi - i;
+            var y_f = fj - j;
+            var idx = j * header.nx + i;
+
+            if (i < header.nx - 1 && j < header.ny - 1) {
+              var u =
+                this.uData[idx] * (1 - x_f) * (1 - y_f) +
+                this.uData[idx + 1] * x_f * (1 - y_f) +
+                this.uData[idx + header.nx] * (1 - x_f) * y_f +
+                this.uData[idx + header.nx + 1] * x_f * y_f;
+              var v =
+                this.vData[idx] * (1 - x_f) * (1 - y_f) +
+                this.vData[idx + 1] * x_f * (1 - y_f) +
+                this.vData[idx + header.nx] * (1 - x_f) * y_f +
+                this.vData[idx + header.nx + 1] * x_f * y_f;
+              var speed = Math.sqrt(u * u + v * v);
+              if (speed >= this.options.minSpeed) {
+                this._wavePoints.push({ x: x, y: y, u: u, v: v, speed: speed });
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // 绘制所有波纹
+    ctx.strokeStyle = this.options.color;
+    ctx.lineWidth = this.options.lineWidth;
+    ctx.lineCap = "round";
+
+    var waveW = this.options.waveWidth;
+    var amp = this.options.waveAmplitude;
+    var count = this.options.waveCount;
+    var steps = 10;
+
+    for (var p = 0; p < this._wavePoints.length; p++) {
+      var pt = this._wavePoints[p];
+      var angle = Math.atan2(pt.v, -pt.u);
+
+      var sw = waveW;
+      var sa = amp;
+      if (this.options.dynamicSize) {
+        var scale = Math.min(1.6, 0.5 + pt.speed * 0.08);
+        sw = waveW * scale;
+        sa = amp * scale;
+      }
+
+      // 相位偏移：基于全局phase，让波纹看起来在沿风向漂移
+      var phaseOffset = (phase / sw) * Math.PI * 2;
+      var halfW = sw * 0.5;
+
+      ctx.save();
+      ctx.translate(pt.x, pt.y);
+      ctx.rotate(angle);
+
+      ctx.beginPath();
+      for (var s = 0; s <= steps; s++) {
+        var t = s / steps;
+        var px = -halfW + t * sw;
+        var py = Math.sin(t * Math.PI * 2 * count + phaseOffset) * sa;
+        if (s === 0) {
+          ctx.moveTo(px, py);
+        } else {
+          ctx.lineTo(px, py);
+        }
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
+  },
+});
+
+L.vectorWaveLayer = function (options) {
+  return new L.VectorWaveLayer(options);
+};
+
+/**
+ * L.WaveParticleLayer - 浪粒子图层
+ * 使用与风粒子（velocityLayer）相同的粒子系统
+ * 粒子绘制为白色短横线（垂直于运动方向），沿浪向推进
+ * 叠加在 VectorWaveLayer 上使用
+ */
+L.WaveParticleLayer = L.Layer.extend({
+  options: {
+    data: null,
+    opacity: 0.7,
+    lineWidth: 2,
+    lineLength: 8,
+    particleMultiplier: 1 / 400,
+    particleAge: 40,
+    frameRate: 20,
+    velocityScale: 0.005,
+    color: "rgba(255, 255, 255, 0.9)",
+    maxVelocity: 10,
+  },
+  _timer: 0,
+  initialize: function (options) {
+    L.setOptions(this, options);
+  },
+  onAdd: function (map) {
+    this._paneName = this.options.paneName || "overlayPane";
+    var pane = map._panes.overlayPane;
+    if (map.getPane) {
+      pane = map.getPane(this._paneName);
+      if (!pane) pane = map.createPane(this._paneName);
+    }
+    this._canvasLayer = L.canvasLayer({ pane: pane }).delegate(this);
+    this._canvasLayer.addTo(map);
+    this._map = map;
+  },
+  onRemove: function (map) {
+    this._destroy();
+  },
+  setData: function (data) {
+    this.options.data = data;
+    if (this._engine) {
+      this._engine.setData(data);
+      this._clearAndRestart();
+    }
+    this.fire("load");
+  },
+  onDrawLayer: function (overlay, params) {
+    if (!this._engine) {
+      this._init(this);
+      return;
+    }
+    if (!this.options.data) return;
+    var self = this;
+    if (this._timer) clearTimeout(self._timer);
+    this._timer = setTimeout(function () {
+      self._startEngine();
+    }, 0);
+  },
+  _startEngine: function () {
+    var bounds = this._map.getBounds();
+    var size = this._map.getSize();
+    this._engine.start(
+      [
+        [0, 0],
+        [size.x, size.y],
+      ],
+      size.x,
+      size.y,
+      [
+        [bounds._southWest.lng, bounds._southWest.lat],
+        [bounds._northEast.lng, bounds._northEast.lat],
+      ],
+    );
+  },
+  _init: function (self) {
+    var options = Object.assign(
+      { canvas: self._canvasLayer._canvas, map: this._map },
+      self.options,
+    );
+    this._engine = new WaveParticleEngine(options);
+    this._context = this._canvasLayer._canvas.getContext("2d");
+    this._canvasLayer._canvas.style.opacity = options.opacity;
+    this._canvasLayer._canvas.classList.add("wave-particle-overlay");
+    this._canvasLayer._canvas.classList.add("leaflet-zoom-hide");
+    this.onDrawLayer();
+    this._map.on("moveend", self._clearAndRestart, self);
+    this._map.on("zoomend", self._clearAndRestart, self);
+    this._map.on("resize", self._clear, self);
+  },
+  _clearAndRestart: function () {
+    if (this._context) this._context.clearRect(0, 0, 3000, 3000);
+    var c = document.querySelector(".wave-particle-overlay");
+    if (c) c.style.visibility = "hidden";
+    var self = this;
+    setTimeout(function () {
+      if (self._engine) self._startEngine();
+      var c = document.querySelector(".wave-particle-overlay");
+      if (c) c.style.visibility = "visible";
+    }, 100);
+  },
+  _clear: function () {
+    if (this._engine) this._engine.stop();
+    if (this._context) this._context.clearRect(0, 0, 3000, 3000);
+  },
+  _destroy: function () {
+    if (this._timer) clearTimeout(this._timer);
+    if (this._engine) this._engine.stop();
+    if (this._context) this._context.clearRect(0, 0, 3000, 3000);
+    this._engine = null;
+    this._map.off("moveend", this._clearAndRestart, this);
+    this._map.off("zoomend", this._clearAndRestart, this);
+    this._map.off("resize", this._clear, this);
+    this._map.removeLayer(this._canvasLayer);
+  },
+});
+
+L.waveParticleLayer = function (options) {
+  return new L.WaveParticleLayer(options);
+};
+
+/**
+ * WaveParticleEngine - 浪粒子引擎
+ * 与 Windy 引擎结构相同，但 draw() 绘制白色短横线（垂直于运动方向）
+ */
+var WaveParticleEngine = function (params) {
+  var VELOCITY_SCALE =
+    (params.velocityScale || 0.005) *
+    (Math.pow(window.devicePixelRatio, 1 / 3) || 1);
+  var MAX_PARTICLE_AGE = params.particleAge || 40;
+  var PARTICLE_LINE_WIDTH = params.lineWidth || 2;
+  var LINE_LENGTH = params.lineLength || 8;
+  var PARTICLE_MULTIPLIER = params.particleMultiplier || 1 / 400;
+  var FRAME_RATE = params.frameRate || 20;
+  var FRAME_TIME = 1000 / FRAME_RATE;
+  var FADE_OPACITY = 0.93;
+  var COLOR = params.color || "rgba(255, 255, 255, 0.9)";
+  var NULL_VECTOR = [NaN, NaN, null];
+  var builder,
+    grid,
+    gridData = params.data;
+  var λ0, φ0, Δλ, Δφ, ni, nj;
+
+  var setData = function (data) {
+    gridData = data;
+  };
+
+  var bilinearInterp = function (x, y, g00, g10, g01, g11) {
+    var rx = 1 - x,
+      ry = 1 - y;
+    var u =
+      g00[0] * rx * ry + g10[0] * x * ry + g01[0] * rx * y + g11[0] * x * y;
+    var v =
+      g00[1] * rx * ry + g10[1] * x * ry + g01[1] * rx * y + g11[1] * x * y;
+    return [u, v, Math.sqrt(u * u + v * v)];
+  };
+
+  var createBuilder = function (data) {
+    var uComp = null,
+      vComp = null;
+    var dirComp = null,
+      periodComp = null;
+
+    data.forEach(function (r) {
+      var key = r.header.parameterCategory + "," + r.header.parameterNumber;
+      // 风场 u/v 分量格式
+      if (key === "1,2" || key === "0,2" || key === "2,2") uComp = r;
+      if (key === "1,3" || key === "0,3" || key === "2,3") vComp = r;
+      // 波浪方向+周期格式 (parameterCategory=0)
+      if (key === "0,10") dirComp = r; // 波浪方向 (degrees)
+      if (key === "0,11") periodComp = r; // 波浪周期 (s)
+    });
+
+    // 如果有 u/v 分量，直接使用
+    if (uComp && vComp) {
+      return {
+        header: uComp.header,
+        data: function (i) {
+          return [uComp.data[i], vComp.data[i]];
+        },
+        interpolate: bilinearInterp,
+      };
+    }
+
+    // 如果是波浪方向+周期格式，转换为 u/v 分量
+    if (dirComp && periodComp) {
+      return {
+        header: dirComp.header,
+        data: function (i) {
+          var dir = dirComp.data[i];
+          var period = periodComp.data[i];
+          if (dir === null || period === null || period === 0) {
+            return [null, null];
+          }
+          // 波浪方向是"来向"，需要转换为"去向"（加180度）
+          // 速度用周期的倒数表示（周期越短，波浪越强）
+          var speed = (1 / period) * 10; // 缩放因子
+          var rad = ((dir + 180) * Math.PI) / 180;
+          var u = speed * Math.sin(rad);
+          var v = speed * Math.cos(rad);
+          return [u, v];
+        },
+        interpolate: bilinearInterp,
+      };
+    }
+
+    // 兜底：返回空数据
+    console.warn("WaveParticleEngine: 无法识别的数据格式");
+    return {
+      header: data[0].header,
+      data: function () {
+        return [null, null];
+      },
+      interpolate: bilinearInterp,
+    };
+  };
+
+  var buildGrid = function (data, callback) {
+    if (data.length < 2) return;
+    builder = createBuilder(data);
+    var h = builder.header;
+    λ0 = h.lo1;
+    φ0 = h.la1;
+    Δλ = h.dx;
+    Δφ = h.dy;
+    ni = h.nx;
+    nj = h.ny;
+    if (h.scanMode) {
+      var bits = ("0" + h.scanMode.toString(2))
+        .slice(-8)
+        .split("")
+        .map(Number)
+        .map(Boolean);
+      if (bits[0]) Δλ = -Δλ;
+      if (bits[1]) Δφ = -Δφ;
+    }
+    grid = [];
+    var p = 0,
+      cont = Math.floor(ni * Δλ) >= 360;
+    for (var j = 0; j < nj; j++) {
+      var row = [];
+      for (var i = 0; i < ni; i++, p++) row[i] = builder.data(p);
+      if (cont) row.push(row[0]);
+      grid[j] = row;
+    }
+    callback({ interpolate: interpolate });
+  };
+
+  var interpolate = function (λ, φ) {
+    if (!grid) return null;
+    var i = ((((λ - λ0) % 360) + 360) % 360) / Δλ;
+    var j = (φ0 - φ) / Δφ;
+    var fi = Math.floor(i),
+      fj = Math.floor(j);
+    var row = grid[fj];
+    if (row) {
+      var g00 = row[fi],
+        g10 = row[fi + 1];
+      if (g00 != null && g10 != null) {
+        var row2 = grid[fj + 1];
+        if (row2) {
+          var g01 = row2[fi],
+            g11 = row2[fi + 1];
+          if (g01 != null && g11 != null)
+            return builder.interpolate(i - fi, j - fj, g00, g10, g01, g11);
+        }
+      }
+    }
+    return null;
+  };
+
+  var project = function (lat, lon) {
+    var xy = params.map.latLngToContainerPoint(L.latLng(lat, lon));
+    return [xy.x, xy.y];
+  };
+  var invert = function (x, y) {
+    var ll = params.map.containerPointToLatLng(L.point(x, y));
+    return [ll.lng, ll.lat];
+  };
+
+  var createField = function (columns, bounds, callback) {
+    function field(x, y) {
+      var c = columns[Math.round(x)];
+      return (c && c[Math.round(y)]) || NULL_VECTOR;
+    }
+    field.release = function () {
+      columns = [];
+    };
+    field.randomize = function (o) {
+      var n = 0;
+      do {
+        o.x = Math.round(Math.random() * bounds.width + bounds.x);
+        o.y = Math.round(Math.random() * bounds.height + bounds.y);
+      } while (field(o.x, o.y)[2] === null && n++ < 30);
+      return o;
+    };
+    callback(bounds, field);
+  };
+
+  var interpolateField = function (grid, bounds, extent, callback) {
+    var mapArea = (extent.south - extent.north) * (extent.west - extent.east);
+    var velScale = VELOCITY_SCALE * Math.pow(mapArea, 0.4);
+    var columns = [],
+      x = bounds.x;
+    function col(x) {
+      var column = [];
+      for (var y = bounds.y; y <= bounds.yMax; y += 2) {
+        var coord = invert(x, y);
+        if (coord && isFinite(coord[0])) {
+          var w = grid.interpolate(coord[0], coord[1]);
+          if (w) {
+            var u = w[0] * velScale,
+              v = w[1] * velScale;
+            var H = 5,
+              hλ = coord[0] < 0 ? H : -H,
+              hφ = coord[1] < 0 ? H : -H;
+            var pλ = project(coord[1], coord[0] + hλ),
+              pφ = project(coord[1] + hφ, coord[0]);
+            var k = Math.cos((coord[1] / 360) * 2 * Math.PI);
+            var d0 = (pλ[0] - x) / hλ / k,
+              d1 = (pλ[1] - y) / hλ / k,
+              d2 = (pφ[0] - x) / hφ,
+              d3 = (pφ[1] - y) / hφ;
+            column[y + 1] = column[y] = [
+              d0 * u + d2 * v,
+              d1 * u + d3 * v,
+              w[2],
+            ];
+          }
+        }
+      }
+      columns[x + 1] = columns[x] = column;
+    }
+    (function batch() {
+      var start = Date.now();
+      while (x < bounds.width) {
+        col(x);
+        x += 2;
+        if (Date.now() - start > 1000) {
+          setTimeout(batch, 25);
+          return;
+        }
+      }
+      createField(columns, bounds, callback);
+    })();
+  };
+
+  var animationLoop;
+  var animate = function (bounds, field) {
+    var count = Math.round(bounds.width * bounds.height * PARTICLE_MULTIPLIER);
+    var particles = [];
+    for (var i = 0; i < count; i++)
+      particles.push(
+        field.randomize({ age: Math.floor(Math.random() * MAX_PARTICLE_AGE) }),
+      );
+
+    function evolve() {
+      particles.forEach(function (p) {
+        if (p.age > MAX_PARTICLE_AGE) {
+          field.randomize(p).age = 0;
+        }
+        var v = field(p.x, p.y);
+        var m = v[2];
+        if (m === null) {
+          p.age = MAX_PARTICLE_AGE;
+        } else {
+          var xt = p.x + v[0],
+            yt = p.y + v[1];
+          if (field(xt, yt)[2] !== null) {
+            p.xt = xt;
+            p.yt = yt;
+            p.m = m;
+          } else {
+            p.x = xt;
+            p.y = yt;
+          }
+        }
+        p.age++;
+      });
+    }
+
+    var g = params.canvas.getContext("2d");
+    g.clearRect(0, 0, g.canvas.width, g.canvas.height);
+
+    function draw() {
+      g.globalCompositeOperation = "destination-in";
+      g.fillStyle = "rgba(0, 0, 0, " + FADE_OPACITY + ")";
+      g.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
+      g.globalCompositeOperation = "lighter";
+      g.strokeStyle = COLOR;
+      g.lineWidth = PARTICLE_LINE_WIDTH;
+      g.lineCap = "round";
+
+      particles.forEach(function (p) {
+        if (p.xt === undefined || p.m === undefined) return;
+        var dx = p.xt - p.x,
+          dy = p.yt - p.y;
+        var dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 0.01) return;
+        // 垂直于运动方向 = 短横线方向
+        var nx = -dy / dist,
+          ny = dx / dist;
+        var halfLen = LINE_LENGTH * 0.5;
+        // 淡入淡出
+        var lr = p.age / MAX_PARTICLE_AGE;
+        var a = lr < 0.15 ? lr / 0.15 : lr > 0.7 ? (1 - lr) / 0.3 : 1;
+        g.globalAlpha = Math.max(0, a * 0.85);
+        g.beginPath();
+        g.moveTo(p.x - nx * halfLen, p.y - ny * halfLen);
+        g.lineTo(p.x + nx * halfLen, p.y + ny * halfLen);
+        g.stroke();
+        p.x = p.xt;
+        p.y = p.yt;
+      });
+    }
+
+    var then = Date.now();
+    (function frame() {
+      animationLoop = requestAnimationFrame(frame);
+      var now = Date.now();
+      if (now - then > FRAME_TIME) {
+        then = now - ((now - then) % FRAME_TIME);
+        evolve();
+        draw();
+      }
+    })();
+  };
+
+  var deg2rad = function (d) {
+    return (d / 180) * Math.PI;
+  };
+  var start = function (bounds, width, height, extent) {
+    var mb = {
+      south: deg2rad(extent[0][1]),
+      north: deg2rad(extent[1][1]),
+      east: deg2rad(extent[1][0]),
+      west: deg2rad(extent[0][0]),
+      width: width,
+      height: height,
+    };
+    stop();
+    buildGrid(gridData, function (g) {
+      interpolateField(
+        g,
+        {
+          x: Math.round(bounds[0][0]),
+          y: Math.max(Math.floor(bounds[0][1]), 0),
+          xMax: Math.min(Math.ceil(bounds[1][0]), width - 1),
+          yMax: Math.min(Math.ceil(bounds[1][1]), height - 1),
+          width: width,
+          height: height,
+        },
+        mb,
+        function (b, f) {
+          animate(b, f);
+        },
+      );
+    });
+  };
+  var stop = function () {
+    if (engine.field) engine.field.release();
+    if (animationLoop) cancelAnimationFrame(animationLoop);
+  };
+  var engine = { start: start, stop: stop, setData: setData };
+  return engine;
 };

@@ -26,7 +26,7 @@
     <div v-if="showChart" class="chart-container" id="chart"></div>
 
     <!-- 
-      播放轴组件
+      播放轴组件（暂时注释）
       Props说明：
       - playing: 播放状态（双向绑定）
       - progress: 当前进度索引（双向绑定）
@@ -34,7 +34,7 @@
       - time-colors: 每个时间点的颜色，用于播放轴分段着色
       - time-dates: 每个时间点的日期，用于日期刻度显示
     -->
-    <PlaybackBar
+    <!-- <PlaybackBar
       class="playback-bar"
       :playing.sync="playing"
       :progress.sync="playbackProgress"
@@ -42,7 +42,7 @@
       :time-colors="timeColors"
       :time-dates="timeDates"
       @progress-change="handleProgressChange"
-    />
+    /> -->
 
     <!-- 图层控制面板 - 可折叠 -->
     <div class="controls" :class="{ collapsed: panelCollapsed }">
@@ -52,125 +52,205 @@
       </div>
 
       <div class="panel-body" v-show="!panelCollapsed">
-        <!-- 颜色图层 -->
-        <div class="control-section">
-          <div class="control-item">
-            <label>
+        <!-- 数据类型选择（风/浪单选） -->
+        <div class="control-section data-type-section">
+          <div class="section-title">数据类型</div>
+          <div class="radio-group">
+            <label class="radio-item" :class="{ active: dataType === 'wind' }">
               <input
-                type="checkbox"
-                v-model="showScalar"
-                @change="toggleScalar"
+                type="radio"
+                name="dataType"
+                value="wind"
+                v-model="dataType"
+                @change="switchDataType"
               />
-              颜色图层
+              <span class="radio-label">风场</span>
             </label>
-          </div>
-          <div v-if="showScalar" class="sub-controls">
-            <div class="slider-item">
-              <span>透明度: {{ scalarOpacity.toFixed(2) }}</span>
+            <label class="radio-item" :class="{ active: dataType === 'wave' }">
               <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.05"
-                v-model.number="scalarOpacity"
-                @input="updateScalarOpacity"
+                type="radio"
+                name="dataType"
+                value="wave"
+                v-model="dataType"
+                @change="switchDataType"
               />
-            </div>
-            <div class="slider-item">
-              <span>色阶上限: {{ scalarMaxValue }} m/s</span>
-              <input
-                type="range"
-                min="10"
-                max="50"
-                step="5"
-                v-model.number="scalarMaxValue"
-                @input="updateScalarMaxValue"
-              />
-              <div class="hint">风速≥此值显示最深色</div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 粒子图层 -->
-        <div class="control-section">
-          <div class="control-item">
-            <label>
-              <input
-                type="checkbox"
-                v-model="showVector"
-                @change="toggleVector"
-              />
-              粒子图层
+              <span class="radio-label">浪场</span>
             </label>
           </div>
         </div>
 
-        <!-- 箭头图层 -->
-        <div class="control-section">
-          <div class="control-item">
-            <label>
-              <input
-                type="checkbox"
-                v-model="showArrow"
-                @change="toggleArrow"
-              />
-              箭头图层
-            </label>
-          </div>
-          <div v-if="showArrow" class="sub-controls">
+        <!-- 风场图层控制（仅当选择风场时显示） -->
+        <template v-if="dataType === 'wind'">
+          <!-- 颜色图层 -->
+          <div class="control-section">
             <div class="control-item">
-              <label
-                ><input
+              <label>
+                <input
                   type="checkbox"
-                  v-model="arrowDynamicColor"
-                  @change="updateArrowLayer"
+                  v-model="showScalar"
+                  @change="toggleScalar"
                 />
-                动态颜色</label
-              >
+                颜色图层
+              </label>
             </div>
-            <div class="control-item">
-              <label
-                ><input
-                  type="checkbox"
-                  v-model="arrowDynamicSize"
-                  @change="updateArrowLayer"
+            <div v-if="showScalar" class="sub-controls">
+              <div class="slider-item">
+                <span>透明度: {{ scalarOpacity.toFixed(2) }}</span>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  v-model.number="scalarOpacity"
+                  @input="updateScalarOpacity"
                 />
-                动态大小</label
-              >
-            </div>
-            <div class="control-item">
-              <label
-                ><input
-                  type="checkbox"
-                  v-model="arrowAlignToGrid"
-                  @change="updateArrowLayer"
+              </div>
+              <div class="slider-item">
+                <span>色阶上限: {{ scalarMaxValue }} m/s</span>
+                <input
+                  type="range"
+                  min="10"
+                  max="50"
+                  step="5"
+                  v-model.number="scalarMaxValue"
+                  @input="updateScalarMaxValue"
                 />
-                网格对齐</label
-              >
-            </div>
-            <div class="slider-item">
-              <span>间距: {{ arrowGridSize }}px</span>
-              <input
-                type="range"
-                min="20"
-                max="80"
-                step="5"
-                v-model.number="arrowGridSize"
-                @input="updateArrowLayer"
-              />
+                <div class="hint">风速≥此值显示最深色</div>
+              </div>
             </div>
           </div>
-        </div>
 
-        <!-- 风杆图层 -->
-        <div class="control-section">
-          <div class="control-item">
-            <label>
-              <input type="checkbox" v-model="showBarb" @change="toggleBarb" />
-              风杆图层
-            </label>
+          <!-- 粒子图层 -->
+          <div class="control-section">
+            <div class="control-item">
+              <label>
+                <input
+                  type="checkbox"
+                  v-model="showVector"
+                  @change="toggleVector"
+                />
+                粒子图层
+              </label>
+            </div>
           </div>
-        </div>
+
+          <!-- 箭头图层 -->
+          <div class="control-section">
+            <div class="control-item">
+              <label>
+                <input
+                  type="checkbox"
+                  v-model="showArrow"
+                  @change="toggleArrow"
+                />
+                箭头图层
+              </label>
+            </div>
+            <div v-if="showArrow" class="sub-controls">
+              <div class="control-item">
+                <label
+                  ><input
+                    type="checkbox"
+                    v-model="arrowDynamicColor"
+                    @change="updateArrowLayer"
+                  />
+                  动态颜色</label
+                >
+              </div>
+              <div class="control-item">
+                <label
+                  ><input
+                    type="checkbox"
+                    v-model="arrowDynamicSize"
+                    @change="updateArrowLayer"
+                  />
+                  动态大小</label
+                >
+              </div>
+              <div class="control-item">
+                <label
+                  ><input
+                    type="checkbox"
+                    v-model="arrowAlignToGrid"
+                    @change="updateArrowLayer"
+                  />
+                  网格对齐</label
+                >
+              </div>
+              <div class="slider-item">
+                <span>间距: {{ arrowGridSize }}px</span>
+                <input
+                  type="range"
+                  min="20"
+                  max="80"
+                  step="5"
+                  v-model.number="arrowGridSize"
+                  @input="updateArrowLayer"
+                />
+              </div>
+            </div>
+          </div>
+
+          <!-- 风杆图层 -->
+          <div class="control-section">
+            <div class="control-item">
+              <label>
+                <input type="checkbox" v-model="showBarb" @change="toggleBarb" />
+                风杆图层
+              </label>
+            </div>
+          </div>
+        </template>
+
+        <!-- 浪场图层控制（仅当选择浪场时显示） -->
+        <template v-if="dataType === 'wave'">
+          <!-- 浪场颜色图层 -->
+          <div class="control-section">
+            <div class="control-item">
+              <label>
+                <input type="checkbox" v-model="showWaveScalar" @change="toggleWaveScalar" />
+                颜色图层
+              </label>
+            </div>
+            <div v-if="showWaveScalar" class="sub-controls">
+              <div class="slider-item">
+                <span>透明度: {{ waveScalarOpacity.toFixed(2) }}</span>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  v-model.number="waveScalarOpacity"
+                  @input="updateWaveScalarOpacity"
+                />
+              </div>
+            </div>
+          </div>
+
+          <!-- 浪效果粒子图层 -->
+          <div class="control-section">
+            <div class="control-item">
+              <label>
+                <input type="checkbox" v-model="showWave" @change="toggleWave" />
+                粒子图层
+              </label>
+            </div>
+            <div v-if="showWave" class="sub-controls">
+              <div class="slider-item">
+                <span>速度: {{ waveSpeed.toFixed(3) }}</span>
+                <input
+                  type="range"
+                  min="0.001"
+                  max="0.05"
+                  step="0.001"
+                  v-model.number="waveSpeed"
+                  @input="updateWaveLayer"
+                />
+                <div class="hint">粒子移动速度</div>
+              </div>
+            </div>
+          </div>
+        </template>
 
         <!-- 单点过程线 -->
         <div class="control-section">
@@ -198,6 +278,7 @@ import * as echarts from "echarts";
 import { getProcessLineOption } from "@/utils/getProcessLineOption";
 import MapToolbar from "@/components/MapToolbar";
 import PlaybackBar from "./components/PlaybackBar.vue";
+import waveData from "@/assets/wave.json";
 
 // 风场数据文件路径（放在 public 目录，通过 HTTP 请求加载）
 const WIND_DATA_FILES = [
@@ -230,12 +311,18 @@ export default {
       map: null,
 
       // ========== 图层显示状态 ==========
+      /** 当前数据类型：wind 或 wave */
+      dataType: 'wind',
       /** 是否显示颜色图层（标量场） */
       showScalar: true,
       /** 是否显示粒子图层（矢量场动画） */
       showVector: true,
       /** 是否显示箭头图层 */
       showArrow: false,
+      /** 是否显示浪效果图层 */
+      showWave: true,
+      /** 是否显示浪场颜色图层 */
+      showWaveScalar: true,
       /** 是否显示风杆图层 */
       showBarb: false,
       /** 是否显示单点过程线图表 */
@@ -250,6 +337,10 @@ export default {
       velocityLayer: null,
       /** 箭头图层实例 */
       arrowLayer: null,
+      /** 浪效果图层实例 */
+      waveLayer: null,
+      /** 浪场颜色图层实例 */
+      waveScalarLayer: null,
       /** 风杆图层实例 */
       barbLayer: null,
       /** 瓦片标量图层实例 */
@@ -274,6 +365,12 @@ export default {
       arrowAlignToGrid: false,
       /** 箭头网格间距（像素） */
       arrowGridSize: 40,
+
+      // ========== 浪效果图层参数 ==========
+      /** 浪粒子速度 */
+      waveSpeed: 0.020,
+      /** 浪场颜色图层透明度 */
+      waveScalarOpacity: 0.4,
 
       // ========== 风场数据 ==========
       /** 5天的风场数据数组，每天一份（动态加载） */
@@ -332,6 +429,94 @@ export default {
   },
 
   methods: {
+    // ==========================================
+    // 数据类型切换
+    // ==========================================
+
+    /**
+     * 切换数据类型（风/浪）
+     * 切换时隐藏另一类型的所有图层
+     */
+    switchDataType() {
+      if (this.dataType === 'wind') {
+        // 切换到风场：隐藏浪图层，显示风图层
+        this.hideWaveLayers();
+        this.showWindLayers();
+      } else {
+        // 切换到浪场：隐藏风图层，显示浪图层
+        this.hideWindLayers();
+        this.showWaveLayers();
+      }
+    },
+
+    /**
+     * 隐藏所有风场图层
+     */
+    hideWindLayers() {
+      if (this.tileScalarLayer) {
+        this.map.removeLayer(this.tileScalarLayer);
+        this.tileScalarLayer = null;
+      }
+      if (this.velocityLayer) {
+        try {
+          this.velocityLayer.onRemove(this.map);
+        } catch (e) {}
+        this.velocityLayer = null;
+      }
+      if (this.arrowLayer) {
+        this.map.removeLayer(this.arrowLayer);
+        this.arrowLayer = null;
+      }
+      if (this.barbLayer) {
+        this.map.removeLayer(this.barbLayer);
+        this.barbLayer = null;
+      }
+    },
+
+    /**
+     * 显示风场图层（根据当前勾选状态）
+     */
+    showWindLayers() {
+      if (this.showScalar && !this.tileScalarLayer) {
+        this.addScalarLayer();
+      }
+      if (this.showVector && !this.velocityLayer) {
+        this.addVectorLayer();
+      }
+      if (this.showArrow && !this.arrowLayer) {
+        this.addArrowLayer();
+      }
+      if (this.showBarb && !this.barbLayer) {
+        this.addBarbLayer();
+      }
+    },
+
+    /**
+     * 隐藏浪场图层
+     */
+    hideWaveLayers() {
+      if (this.waveLayer) {
+        this.map.removeLayer(this.waveLayer);
+        this.waveLayer = null;
+      }
+      if (this.waveScalarLayer) {
+        this.map.removeLayer(this.waveScalarLayer);
+        this.waveScalarLayer = null;
+      }
+    },
+
+    /**
+     * 显示浪场图层（根据当前勾选状态）
+     */
+    showWaveLayers() {
+      if (this.showWaveScalar && !this.waveScalarLayer) {
+        this.addWaveScalarLayer();
+      }
+      if (this.showWave && !this.waveLayer) {
+        this.addWaveLayer();
+      }
+    },
+
     // ==========================================
     // 测试数据生成方法
     // 用于PlaybackBar组件的演示和测试
@@ -444,6 +629,8 @@ export default {
      */
     updateWindLayers() {
       if (!this.currentWindData) return;
+      // 只有当前是风场模式才更新风场图层
+      if (this.dataType !== 'wind') return;
 
       // 更新或创建颜色图层
       if (this.showScalar) {
@@ -685,6 +872,85 @@ export default {
     },
 
     /**
+     * 添加浪场颜色图层
+     */
+    addWaveScalarLayer() {
+      const config = {
+        minValue: 0.01,
+        maxValue: 10,
+        overlayOpacity: this.waveScalarOpacity,
+      };
+      this.waveScalarLayer = L.scalarTileLayer(config);
+      this.waveScalarLayer.addTo(this.map);
+      this.waveScalarLayer.setData(waveData);
+    },
+
+    /**
+     * 切换浪场颜色图层显示
+     */
+    toggleWaveScalar() {
+      if (this.showWaveScalar) {
+        this.addWaveScalarLayer();
+      } else if (this.waveScalarLayer) {
+        this.map.removeLayer(this.waveScalarLayer);
+        this.waveScalarLayer = null;
+      }
+    },
+
+    /**
+     * 更新浪场颜色图层透明度
+     */
+    updateWaveScalarOpacity() {
+      if (this.waveScalarLayer) {
+        this.waveScalarLayer.setOverlayOpacity(this.waveScalarOpacity);
+      }
+    },
+
+    /**
+     * 添加浪效果图层
+     */
+    addWaveLayer() {
+      // 浪粒子图层（白色短横线沿浪向推进）
+      this.waveLayer = L.waveParticleLayer({
+        color: 'rgba(255, 255, 255, 0.9)',
+        lineWidth: 2,
+        lineLength: 6,  // 缩小到原来的三分之二
+        particleMultiplier: 1 / 500,
+        particleAge: 35,
+        frameRate: 20,
+        opacity: 0.8,
+        velocityScale: this.waveSpeed,
+      });
+      this.waveLayer.addTo(this.map);
+      this.waveLayer.setData(waveData);
+    },
+
+    /**
+     * 切换浪效果图层显示
+     */
+    toggleWave() {
+      if (this.showWave) {
+        this.addWaveLayer();
+      } else if (this.waveLayer) {
+        this.map.removeLayer(this.waveLayer);
+        this.waveLayer = null;
+      }
+    },
+
+    /**
+     * 更新浪效果图层参数（重新创建）
+     */
+    updateWaveLayer() {
+      if (this.waveLayer) {
+        this.map.removeLayer(this.waveLayer);
+        this.waveLayer = null;
+      }
+      if (this.showWave) {
+        this.addWaveLayer();
+      }
+    },
+
+    /**
      * 切换风杆图层显示
      */
     toggleBarb() {
@@ -871,5 +1137,48 @@ input[type="checkbox"]:disabled {
   font-size: 10px;
   color: #999;
   margin-top: 2px;
+}
+/* 数据类型单选样式 */
+.data-type-section {
+  background: #f0f7ff;
+  margin: -12px -15px 12px;
+  padding: 12px 15px;
+  border-bottom: 2px solid #1890ff;
+}
+.section-title {
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 8px;
+}
+.radio-group {
+  display: flex;
+  gap: 12px;
+}
+.radio-item {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 12px;
+  background: #fff;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.radio-item:hover {
+  border-color: #1890ff;
+}
+.radio-item.active {
+  background: #e6f7ff;
+  border-color: #1890ff;
+  color: #1890ff;
+}
+.radio-item input[type="radio"] {
+  margin-right: 6px;
+}
+.radio-label {
+  font-size: 13px;
+  font-weight: 500;
 }
 </style>
