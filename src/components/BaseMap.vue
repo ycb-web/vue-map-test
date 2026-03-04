@@ -4,11 +4,14 @@
   </div>
 </template>
 
-<script>
+<script setup lang="ts">
+import { ref, onMounted, onUnmounted } from 'vue'
 import L from "leaflet";
+import "@geoman-io/leaflet-geoman-free";
+import "@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css";
 
 // 内置底图枚举
-const BASEMAP_PRESETS = {
+const BASEMAP_PRESETS: Record<string, any> = {
   // 天地图影像
   tianditu_img: {
     url: "https://t{s}.tianditu.gov.cn/img_w/wmts?tk={tk}&SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=img&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TileMatrix={z}&TileCol={x}&TileRow={y}",
@@ -94,213 +97,213 @@ const BASEMAP_PRESETS = {
 
 let mapIdCounter = 0;
 
-export default {
-  name: "BaseMap",
-  props: {
-    // 地图配置
-    options: {
-      type: Object,
-      default: () => ({}),
-    },
-    // 底图类型（使用预设）
-    basemap: {
-      type: String,
-      default: "tianditu_img",
-    },
-    // 天地图 token
-    tiandituToken: {
-      type: String,
-      default: "93724b915d1898d946ca7dc7b765dda5",
-    },
-    // 是否显示注记
-    showAnnotation: {
-      type: Boolean,
-      default: true,
-    },
-  },
-  data() {
-    return {
-      map: null,
-      mapId: `base-map-${++mapIdCounter}`,
-      basemapLayer: null,
-      annotationLayer: null,
-    };
-  },
-  mounted() {
-    this.initMap();
-  },
-  beforeDestroy() {
-    this.destroy();
-  },
-  methods: {
-    /**
-     * 初始化地图
-     */
-    initMap() {
-      const defaultOptions = {
-        center: [35, 110],
-        zoom: 4,
-        maxZoom: 18,
-        minZoom: 2,
-        zoomControl: true,
-      };
+const props = withDefaults(defineProps<{
+  options?: Record<string, any>
+  basemap?: string
+  tiandituToken?: string
+  showAnnotation?: boolean
+}>(), {
+  options: () => ({}),
+  basemap: "tianditu_img",
+  tiandituToken: "93724b915d1898d946ca7dc7b765dda5",
+  showAnnotation: true,
+})
 
-      const mapOptions = { ...defaultOptions, ...this.options };
-      const { center, ...restOptions } = mapOptions;
+const emit = defineEmits<{
+  (e: 'map-ready', map: L.Map): void
+}>()
 
-      this.map = L.map(this.mapId, restOptions).setView(
-        center,
-        mapOptions.zoom
-      );
+const mapId = ref(`base-map-${++mapIdCounter}`)
+const map = ref<L.Map | null>(null)
+const basemapLayer = ref<L.TileLayer | null>(null)
+const annotationLayer = ref<L.TileLayer | null>(null)
 
-      // 添加底图
-      this.setBasemap(this.basemap);
+/**
+ * 初始化地图
+ */
+const initMap = () => {
+  const defaultOptions = {
+    center: [35, 110],
+    zoom: 4,
+    maxZoom: 18,
+    minZoom: 2,
+    zoomControl: true,
+  };
 
-      // 触发地图初始化完成事件
-      this.$emit("map-ready", this.map);
-    },
+  const mapOptions = { ...defaultOptions, ...props.options };
+  const { center, ...restOptions } = mapOptions;
 
-    /**
-     * 获取地图实例
-     */
-    getMap() {
-      return this.map;
-    },
+  map.value = L.map(mapId.value, restOptions).setView(
+    center,
+    mapOptions.zoom
+  );
 
-    /**
-     * 设置底图（使用预设）
-     * @param {string} type - 底图类型
-     */
-    setBasemap(type) {
-      // 移除现有底图
-      this.removeBasemap();
+  // 添加底图
+  setBasemap(props.basemap);
 
-      const preset = BASEMAP_PRESETS[type];
-      if (!preset) return;
-
-      // 处理 URL 中的 token
-      let url = preset.url;
-      if (url.includes("{tk}")) {
-        url = url.replace(/{tk}/g, this.tiandituToken);
-      }
-
-      this.basemapLayer = L.tileLayer(url, preset.options);
-      this.basemapLayer.addTo(this.map);
-
-      // 添加注记图层
-      if (this.showAnnotation && preset.annotation) {
-        let annotationUrl = preset.annotation.url;
-        if (annotationUrl.includes("{tk}")) {
-          annotationUrl = annotationUrl.replace(/{tk}/g, this.tiandituToken);
-        }
-        this.annotationLayer = L.tileLayer(
-          annotationUrl,
-          preset.annotation.options
-        );
-        this.annotationLayer.addTo(this.map);
-      }
-    },
-
-    /**
-     * 自定义底图
-     * @param {string} url - 瓦片 URL
-     * @param {Object} options - 图层配置
-     */
-    setCustomBasemap(url, options = {}) {
-      this.removeBasemap();
-      this.basemapLayer = L.tileLayer(url, options);
-      this.basemapLayer.addTo(this.map);
-    },
-
-    /**
-     * 添加自定义注记图层
-     * @param {string} url - 瓦片 URL
-     * @param {Object} options - 图层配置
-     */
-    setCustomAnnotation(url, options = {}) {
-      this.removeAnnotation();
-      this.annotationLayer = L.tileLayer(url, {
-        transparent: true,
-        zIndex: 3,
-        ...options,
-      });
-      this.annotationLayer.addTo(this.map);
-    },
-
-    /**
-     * 移除底图
-     */
-    removeBasemap() {
-      if (this.basemapLayer) {
-        this.map.removeLayer(this.basemapLayer);
-        this.basemapLayer = null;
-      }
-      this.removeAnnotation();
-    },
-
-    /**
-     * 移除注记
-     */
-    removeAnnotation() {
-      if (this.annotationLayer) {
-        this.map.removeLayer(this.annotationLayer);
-        this.annotationLayer = null;
-      }
-    },
-
-    /**
-     * 切换注记显示
-     * @param {boolean} show
-     */
-    toggleAnnotation(show) {
-      if (show && !this.annotationLayer) {
-        const preset = BASEMAP_PRESETS[this.basemap];
-        if (preset && preset.annotation) {
-          let url = preset.annotation.url.replace(/{tk}/g, this.tiandituToken);
-          this.annotationLayer = L.tileLayer(url, preset.annotation.options);
-          this.annotationLayer.addTo(this.map);
-        }
-      } else if (!show && this.annotationLayer) {
-        this.removeAnnotation();
-      }
-    },
-
-    /**
-     * 设置地图中心和缩放
-     * @param {Array} center - [lat, lng]
-     * @param {number} zoom
-     */
-    setView(center, zoom) {
-      this.map.setView(center, zoom);
-    },
-
-    /**
-     * 适应边界
-     * @param {L.LatLngBounds} bounds
-     * @param {Object} options
-     */
-    fitBounds(bounds, options = {}) {
-      this.map.fitBounds(bounds, { padding: [50, 50], ...options });
-    },
-
-    /**
-     * 销毁地图
-     */
-    destroy() {
-      if (this.map) {
-        this.map.remove();
-        this.map = null;
-      }
-    },
-
-    /**
-     * 获取可用的底图预设列表
-     */
-    getBasemapPresets() {
-      return Object.keys(BASEMAP_PRESETS);
-    },
-  },
+  // 触发地图初始化完成事件
+  emit("map-ready", map.value);
 };
+
+/**
+ * 获取地图实例
+ */
+const getMap = () => {
+  return map.value;
+};
+
+/**
+ * 设置底图（使用预设）
+ */
+const setBasemap = (type: string) => {
+  if (!map.value) return;
+
+  // 移除现有底图
+  removeBasemap();
+
+  const preset = BASEMAP_PRESETS[type];
+  if (!preset) return;
+
+  // 处理 URL 中的 token
+  let url = preset.url;
+  if (url.includes("{tk}")) {
+    url = url.replace(/{tk}/g, props.tiandituToken);
+  }
+
+  basemapLayer.value = L.tileLayer(url, preset.options);
+  basemapLayer.value.addTo(map.value);
+
+  // 添加注记图层
+  if (props.showAnnotation && preset.annotation) {
+    let annotationUrl = preset.annotation.url;
+    if (annotationUrl.includes("{tk}")) {
+      annotationUrl = annotationUrl.replace(/{tk}/g, props.tiandituToken);
+    }
+    annotationLayer.value = L.tileLayer(
+      annotationUrl,
+      preset.annotation.options
+    );
+    annotationLayer.value.addTo(map.value);
+  }
+};
+
+/**
+ * 自定义底图
+ */
+const setCustomBasemap = (url: string, options: Record<string, any> = {}) => {
+  if (!map.value) return;
+  removeBasemap();
+  basemapLayer.value = L.tileLayer(url, options);
+  basemapLayer.value.addTo(map.value);
+};
+
+/**
+ * 自定义注记图层
+ */
+const setCustomAnnotation = (url: string, options: Record<string, any> = {}) => {
+  if (!map.value) return;
+  removeAnnotation();
+  annotationLayer.value = L.tileLayer(url, {
+    transparent: true,
+    zIndex: 3,
+    ...options,
+  });
+  annotationLayer.value.addTo(map.value);
+};
+
+/**
+ * 移除底图
+ */
+const removeBasemap = () => {
+  if (!map.value) return;
+  if (basemapLayer.value) {
+    map.value.removeLayer(basemapLayer.value);
+    basemapLayer.value = null;
+  }
+  removeAnnotation();
+};
+
+/**
+ * 移除注记
+ */
+const removeAnnotation = () => {
+  if (!map.value) return;
+  if (annotationLayer.value) {
+    map.value.removeLayer(annotationLayer.value);
+    annotationLayer.value = null;
+  }
+};
+
+/**
+ * 切换注记显示
+ */
+const toggleAnnotation = (show: boolean) => {
+  if (!map.value) return;
+  if (show && !annotationLayer.value) {
+    const preset = BASEMAP_PRESETS[props.basemap];
+    if (preset && preset.annotation) {
+      let url = preset.annotation.url.replace(/{tk}/g, props.tiandituToken);
+      annotationLayer.value = L.tileLayer(url, preset.annotation.options);
+      annotationLayer.value.addTo(map.value);
+    }
+  } else if (!show && annotationLayer.value) {
+    removeAnnotation();
+  }
+};
+
+/**
+ * 设置地图中心和缩放
+ */
+const setView = (center: [number, number], zoom: number) => {
+  map.value?.setView(center, zoom);
+};
+
+/**
+ * 适应边界
+ */
+const fitBounds = (bounds: L.LatLngBounds, options: Record<string, any> = {}) => {
+  map.value?.fitBounds(bounds, { padding: [50, 50], ...options });
+};
+
+/**
+ * 销毁地图
+ */
+const destroy = () => {
+  if (map.value) {
+    map.value.remove();
+    map.value = null;
+  }
+};
+
+/**
+ * 获取可用的底图预设列表
+ */
+const getBasemapPresets = () => {
+  return Object.keys(BASEMAP_PRESETS);
+};
+
+onMounted(() => {
+  initMap();
+});
+
+onUnmounted(() => {
+  destroy();
+});
+
+// 暴露方法给父组件
+defineExpose({
+  getMap,
+  setBasemap,
+  setCustomBasemap,
+  setCustomAnnotation,
+  removeBasemap,
+  removeAnnotation,
+  toggleAnnotation,
+  setView,
+  fitBounds,
+  destroy,
+  getBasemapPresets,
+});
 </script>
 
 <style scoped>

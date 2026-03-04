@@ -40,7 +40,7 @@
         >
           <a-checkbox
             :checked="panel.visible !== false"
-            @change="(e) => onPanelCheckChange(panel.id, e.target.checked)"
+            @change="(e: any) => onPanelCheckChange(panel.id, e.target.checked)"
           >
             <span class="panel-label">
               <span class="panel-color" :style="{ background: panel.color || '#e74c3c' }"></span>
@@ -58,71 +58,68 @@
   </div>
 </template>
 
-<script>
-export default {
-  name: "ControlPanel",
-  props: {
-    panels: {
-      type: Array,
-      default: () => [],
-    },
-    autoLayout: {
-      type: Boolean,
-      default: true,
-    },
-  },
-  data() {
-    return {
-      collapsed: false,
-      screenshotLoading: false,
-    };
-  },
-  computed: {
-    visibleCount() {
-      return this.panels.filter((p) => p.visible !== false).length;
-    },
-    isAllSelected() {
-      return this.panels.length > 0 && this.visibleCount === this.panels.length;
-    },
-    isIndeterminate() {
-      return this.visibleCount > 0 && this.visibleCount < this.panels.length;
-    },
-  },
-  methods: {
-    // 切换折叠
-    toggleCollapse() {
-      this.collapsed = !this.collapsed;
-    },
+<script setup lang="ts">
+import { ref, computed } from 'vue'
 
-    // 全选变化
-    onSelectAllChange(e) {
-      this.$emit("toggleAll", e.target.checked);
-    },
+const props = defineProps<{
+  panels: any[]
+  autoLayout: boolean
+}>()
 
-    // 单个面板选中变化
-    onPanelCheckChange(panelId, checked) {
-      this.$emit("togglePanel", panelId, checked);
-    },
+const emit = defineEmits<{
+  (e: 'togglePanel', panelId: string, visible: boolean): void
+  (e: 'toggleAll', visible: boolean): void
+  (e: 'autoLayoutChange', enabled: boolean): void
+  (e: 'screenshot'): void
+}>()
 
-    // 自动布局开关变化
-    onAutoLayoutChange(checked) {
-      this.$emit("autoLayoutChange", checked);
-    },
+const collapsed = ref(false)
+const screenshotLoading = ref(false)
 
-    // 截图
-    async onScreenshot() {
-      this.screenshotLoading = true;
-      try {
-        await this.$emit("screenshot");
-      } finally {
-        // 延迟关闭loading，让截图完成
-        setTimeout(() => {
-          this.screenshotLoading = false;
-        }, 500);
-      }
-    },
-  },
-};
+const visibleCount = computed(() => {
+  return props.panels.filter((p) => p.visible !== false).length
+})
+
+const isAllSelected = computed(() => {
+  return props.panels.length > 0 && visibleCount.value === props.panels.length
+})
+
+const isIndeterminate = computed(() => {
+  return visibleCount.value > 0 && visibleCount.value < props.panels.length
+})
+
+// 切换折叠
+const toggleCollapse = () => {
+  collapsed.value = !collapsed.value
+}
+
+// 全选变化
+const onSelectAllChange = (e: any) => {
+  emit('toggleAll', e.target.checked)
+}
+
+// 单个面板选中变化
+const onPanelCheckChange = (panelId: string, checked: boolean) => {
+  emit('togglePanel', panelId, checked)
+}
+
+// 自动布局开关变化
+const onAutoLayoutChange = (checked: boolean) => {
+  emit('autoLayoutChange', checked)
+}
+
+// 截图
+const onScreenshot = async () => {
+  screenshotLoading.value = true
+  try {
+    await emit('screenshot')
+  } finally {
+    // 延迟关闭loading，让截图完成
+    setTimeout(() => {
+      screenshotLoading.value = false
+    }, 500)
+  }
+}
 </script>
 
 <style scoped>

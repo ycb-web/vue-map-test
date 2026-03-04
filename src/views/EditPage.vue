@@ -8,7 +8,7 @@
     />
     <div class="controls">
       <h3>要素编辑</h3>
-      
+
       <div class="control-section">
         <div class="section-title">绘制工具</div>
         <div class="btn-group">
@@ -86,422 +86,433 @@
   </div>
 </template>
 
-<script>
+<script setup lang="ts">
+import { ref, onMounted } from 'vue'
 import L from "leaflet";
-import "leaflet-draw";
-import "leaflet-draw/dist/leaflet.draw.css";
 import BaseMap from "@/components/BaseMap.vue";
 
-// 标记是否已初始化自定义图标
-let iconInitialized = false;
+const baseMap = ref<any>(null)
+const fileInput = ref<HTMLInputElement | null>(null)
+const map = ref<L.Map | null>(null)
+const drawnItems = ref<L.FeatureGroup | null>(null)
+const drawControl = ref<any>(null)
+const drawMode = ref<string | null>(null)
+const editEnabled = ref(false)
+const selectedLayer = ref<L.Layer | null>(null)
+const features = ref<{ type: string; layer: L.Layer }[]>([])
+const currentDrawHandler = ref<any>(null)
+const isDragging = ref(false)
+const dragStartLatLng = ref<L.LatLng | null>(null)
+const mapOptions = ref({
+  center: [24.5, 118],
+  zoom: 8,
+  maxZoom: 18,
+  minZoom: 3,
+})
 
-function initCustomIcons() {
-  if (iconInitialized || !L.Edit || !L.Edit.PolyVerticesEdit) return;
-  
-  // 自定义更小的顶点图标
-  const smallVertexIcon = L.divIcon({
-    className: "leaflet-editing-icon leaflet-edit-vertex-small",
-    iconSize: [8, 8],
-    iconAnchor: [4, 4],
-  });
+const onMapReady = (mapInstance: L.Map) => {
+  map.value = mapInstance;
 
-  // 覆盖默认的顶点图标
-  L.Edit.PolyVerticesEdit = L.Edit.PolyVerticesEdit.extend({
-    options: {
-      icon: smallVertexIcon,
-      touchIcon: smallVertexIcon,
-    },
-  });
-  
-  iconInitialized = true;
-}
-
-export default {
-  name: "EditPage",
-  components: { BaseMap },
-  data() {
-    return {
-      map: null,
-      drawnItems: null,
-      drawControl: null,
-      drawMode: null,
-      editEnabled: false,
-      selectedLayer: null,
-      features: [],
-      currentDrawHandler: null,
-      isDragging: false,
-      dragStartLatLng: null,
-      mapOptions: {
-        center: [24.5, 118],
-        zoom: 8,
-        maxZoom: 18,
-        minZoom: 3,
-      },
-    };
-  },
-  mounted() {
-    initCustomIcons();
-  },
-  methods: {
-    onMapReady(map) {
-      this.map = map;
-      this.initDrawLayer();
-    },
-
-    initDrawLayer() {
-      // 创建要素图层组
-      this.drawnItems = new L.FeatureGroup();
-      this.map.addLayer(this.drawnItems);
-
-      // 监听绑定
-      this.bindEvents();
-    },
-
-    bindEvents() {
-      // 绘制完成事件 (使用字符串避免 L.Draw.Event 未定义的问题)
-      this.map.on("draw:created", (e) => {
-        const layer = e.layer;
-        const type = e.layerType;
-        
-        this.drawnItems.addLayer(layer);
-        this.features.push({ type, layer });
-        
-        // 绑定点击选中
-        layer.on("click", (evt) => {
-          L.DomEvent.stopPropagation(evt);
-          this.onLayerClick(layer);
-        });
-        
-        // 为线/面绑定整体拖拽
-        if (type !== "marker") {
-          this.bindDragEvents(layer);
-        }
-        
-        // 如果编辑模式开启，为新要素启用编辑
-        if (this.editEnabled) {
-          this.enableLayerEdit(layer);
-        }
-        
-        this.drawMode = null;
+  // 配置 Geoman（延迟确保插件加载完成）
+  setTimeout(() => {
+    if (map.value?.pm) {
+      map.value.pm.addControls({
+        drawMarker: false,
+        drawPolyline: false,
+        drawPolygon: false,
+        editMode: false,
+        removalMode: false,
       });
-    },
+    }
+  }, 100);
 
-    // 为线/面绑定整体拖拽事件
-    bindDragEvents(layer) {
-      layer.on("mousedown", (e) => {
-        if (!this.editEnabled) return;
-        // 检查是否点击在顶点上，如果是则不启动整体拖拽
-        if (e.originalEvent.target.classList.contains("leaflet-editing-icon")) {
-          return;
-        }
-        this.handleStartDrag(layer, e);
-      });
-    },
-
-    handleStartDrag(layer, e) {
-      this.isDragging = true;
-      this.dragStartLatLng = e.latlng;
-      this.map.dragging.disable();
-      
-      // 拖拽前先禁用编辑模式
-      if (layer.editing && layer.editing.enabled()) {
-        layer.editing.disable();
-      }
-      
-      const onMove = (moveEvent) => {
-        if (!this.isDragging) return;
-        const dx = moveEvent.latlng.lat - this.dragStartLatLng.lat;
-        const dy = moveEvent.latlng.lng - this.dragStartLatLng.lng;
-        
-        // 移动所有顶点
-        const latlngs = layer.getLatLngs();
-        const newLatLngs = this.offsetLatLngs(latlngs, dx, dy);
-        layer.setLatLngs(newLatLngs);
-        
-        this.dragStartLatLng = moveEvent.latlng;
-      };
-      
-      const onUp = () => {
-        this.isDragging = false;
-        this.map.dragging.enable();
-        this.map.off("mousemove", onMove);
-        this.map.off("mouseup", onUp);
-        
-        // 重新启用编辑 - 需要重新创建 layer 才能刷新顶点
-        if (this.editEnabled) {
-          this.recreateLayer(layer);
-        }
-      };
-      
-      this.map.on("mousemove", onMove);
-      this.map.on("mouseup", onUp);
-    },
-
-    // 重新创建图层以刷新编辑顶点
-    recreateLayer(oldLayer) {
-      const feature = this.features.find(f => f.layer === oldLayer);
-      if (!feature) return;
-      
-      const latlngs = oldLayer.getLatLngs();
-      const style = {
-        color: oldLayer.options.color || "#3388ff",
-        weight: oldLayer.options.weight || 3,
-        fillColor: oldLayer.options.fillColor || "#3388ff",
-        fillOpacity: oldLayer.options.fillOpacity || 0.3,
-      };
-      
-      // 创建新图层
-      let newLayer;
-      if (feature.type === "polygon") {
-        newLayer = L.polygon(latlngs, style);
-      } else if (feature.type === "polyline") {
-        newLayer = L.polyline(latlngs, style);
-      }
-      
-      if (!newLayer) return;
-      
-      // 移除旧图层
-      this.drawnItems.removeLayer(oldLayer);
-      
-      // 添加新图层
-      this.drawnItems.addLayer(newLayer);
-      
-      // 更新 features 引用
-      feature.layer = newLayer;
-      
-      // 更新选中状态
-      if (this.selectedLayer === oldLayer) {
-        this.selectedLayer = newLayer;
-      }
-      
-      // 绑定事件
-      newLayer.on("click", (evt) => {
-        L.DomEvent.stopPropagation(evt);
-        this.onLayerClick(newLayer);
-      });
-      this.bindDragEvents(newLayer);
-      
-      // 启用编辑
-      if (newLayer.editing) {
-        newLayer.editing.enable();
-      }
-    },
-
-    // 递归偏移坐标（支持多环多边形）
-    offsetLatLngs(latlngs, dx, dy) {
-      if (Array.isArray(latlngs[0])) {
-        return latlngs.map((ring) => this.offsetLatLngs(ring, dx, dy));
-      }
-      return latlngs.map((ll) => L.latLng(ll.lat + dx, ll.lng + dy));
-    },
-
-    startDraw(type) {
-      console.log("startDraw called, type:", type);
-      console.log("L.Draw:", L.Draw);
-      console.log("this.map:", this.map);
-      
-      // 取消当前绘制
-      if (this.currentDrawHandler) {
-        this.currentDrawHandler.disable();
-      }
-
-      this.drawMode = type;
-      let handler;
-
-      const defaultStyle = {
-        color: "#3388ff",
-        weight: 3,
-        fillColor: "#3388ff",
-        fillOpacity: 0.3,
-      };
-
-      switch (type) {
-        case "marker":
-          handler = new L.Draw.Marker(this.map);
-          break;
-        case "polyline":
-          handler = new L.Draw.Polyline(this.map, { shapeOptions: defaultStyle });
-          break;
-        case "polygon":
-          handler = new L.Draw.Polygon(this.map, { shapeOptions: defaultStyle });
-          break;
-      }
-
-      if (handler) {
-        this.currentDrawHandler = handler;
-        handler.enable();
-      }
-    },
-
-    toggleEdit() {
-      this.drawnItems.eachLayer((layer) => {
-        if (this.editEnabled) {
-          this.enableLayerEdit(layer);
-        } else {
-          this.disableLayerEdit(layer);
-        }
-      });
-    },
-
-    enableLayerEdit(layer) {
-      if (layer.editing) {
-        layer.editing.enable();
-      }
-      // 点要素启用拖拽
-      if (layer instanceof L.Marker) {
-        layer.dragging.enable();
-      }
-    },
-
-    disableLayerEdit(layer) {
-      if (layer.editing) {
-        layer.editing.disable();
-      }
-      if (layer instanceof L.Marker) {
-        layer.dragging.disable();
-      }
-    },
-
-    onLayerClick(layer) {
-      // 取消之前选中的高亮
-      if (this.selectedLayer && this.selectedLayer !== layer) {
-        this.resetLayerStyle(this.selectedLayer);
-      }
-      
-      this.selectedLayer = layer;
-      this.highlightLayer(layer);
-    },
-
-    highlightLayer(layer) {
-      if (layer instanceof L.Marker) {
-        // Marker 高亮可以通过改变图标实现
-        layer.setOpacity(0.7);
-      } else {
-        layer.setStyle({ color: "#ff4444", weight: 4 });
-      }
-    },
-
-    resetLayerStyle(layer) {
-      if (layer instanceof L.Marker) {
-        layer.setOpacity(1);
-      } else {
-        layer.setStyle({ color: "#3388ff", weight: 3 });
-      }
-    },
-
-    selectFeature(feature) {
-      this.onLayerClick(feature.layer);
-      // 定位到要素
-      if (feature.layer.getBounds) {
-        this.map.fitBounds(feature.layer.getBounds(), { padding: [50, 50] });
-      } else if (feature.layer.getLatLng) {
-        this.map.setView(feature.layer.getLatLng(), this.map.getZoom());
-      }
-    },
-
-    deleteSelected() {
-      if (!this.selectedLayer) return;
-      
-      this.drawnItems.removeLayer(this.selectedLayer);
-      this.features = this.features.filter((f) => f.layer !== this.selectedLayer);
-      this.selectedLayer = null;
-    },
-
-    clearAll() {
-      this.drawnItems.clearLayers();
-      this.features = [];
-      this.selectedLayer = null;
-    },
-
-    getFeatureIcon(type) {
-      const icons = {
-        marker: "📍",
-        polyline: "📏",
-        polygon: "⬡",
-      };
-      return icons[type] || "📌";
-    },
-
-    // 触发文件选择
-    triggerImport() {
-      this.$refs.fileInput.click();
-    },
-
-    // 处理文件导入
-    handleFileImport(event) {
-      const file = event.target.files[0];
-      if (!file) return;
-
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        try {
-          const geojson = JSON.parse(e.target.result);
-          this.importGeoJSON(geojson);
-        } catch (err) {
-          alert("GeoJSON 解析失败: " + err.message);
-        }
-      };
-      reader.readAsText(file);
-      
-      // 清空 input 以便重复选择同一文件
-      event.target.value = "";
-    },
-
-    // 导入 GeoJSON 数据
-    importGeoJSON(geojson) {
-      const defaultStyle = {
-        color: "#3388ff",
-        weight: 3,
-        fillColor: "#3388ff",
-        fillOpacity: 0.3,
-      };
-
-      L.geoJSON(geojson, {
-        style: function() { return defaultStyle; },
-        pointToLayer: function(f, latlng) {
-          return L.marker(latlng);
-        },
-        onEachFeature: (f, layer) => {
-          // 确定要素类型
-          let type = "polygon";
-          if (layer instanceof L.Marker) {
-            type = "marker";
-          } else if (layer instanceof L.Polyline && !(layer instanceof L.Polygon)) {
-            type = "polyline";
-          }
-
-          // 添加到图层组
-          this.drawnItems.addLayer(layer);
-          this.features.push({ type, layer });
-
-          // 绑定点击事件
-          layer.on("click", (evt) => {
-            L.DomEvent.stopPropagation(evt);
-            this.onLayerClick(layer);
-          });
-
-          // 为线/面绑定拖拽
-          if (type !== "marker") {
-            this.bindDragEvents(layer);
-          }
-
-          // 如果编辑模式开启，启用编辑
-          if (this.editEnabled) {
-            this.enableLayerEdit(layer);
-          }
-        },
-      });
-
-      // 缩放到导入的数据范围
-      if (this.features.length > 0) {
-        const bounds = this.drawnItems.getBounds();
-        if (bounds.isValid()) {
-          this.map.fitBounds(bounds, { padding: [50, 50] });
-        }
-      }
-    },
-  },
+  initDrawLayer();
 };
+
+const initDrawLayer = () => {
+  if (!map.value) return;
+  // 创建要素图层组
+  drawnItems.value = new L.FeatureGroup();
+  map.value.addLayer(drawnItems.value);
+
+  // 监听绑定
+  bindEvents();
+};
+
+const bindEvents = () => {
+  if (!map.value) return;
+
+  // Geoman 绘制完成事件
+  map.value.on('pm:create', (e: any) => {
+    const layer = e.layer;
+    const type = e.shape || (e.layer instanceof L.Marker ? 'marker' : 'polyline');
+
+    if (drawnItems.value) {
+      drawnItems.value.addLayer(layer);
+    }
+    features.value.push({ type, layer });
+
+    // 绑定点击选中
+    layer.on("click", (evt: any) => {
+      L.DomEvent.stopPropagation(evt);
+      onLayerClick(layer);
+    });
+
+    // 为线/面绑定整体拖拽
+    if (type !== "marker") {
+      bindDragEvents(layer);
+    }
+
+    // 如果编辑模式开启，为新要素启用编辑
+    if (editEnabled.value) {
+      enableLayerEdit(layer);
+    }
+
+    drawMode.value = null;
+
+    // 禁用绘制模式
+    map.value.pm.disableDraw();
+  });
+};
+
+// 为线/面绑定整体拖拽事件
+const bindDragEvents = (layer: L.Layer) => {
+  layer.on("mousedown", (e: any) => {
+    if (!editEnabled.value) return;
+    // 检查是否点击在顶点上，如果是则不启动整体拖拽
+    if (e.originalEvent.target.classList.contains("leaflet-editing-icon")) {
+      return;
+    }
+    handleStartDrag(layer, e);
+  });
+};
+
+const handleStartDrag = (layer: L.Layer, e: any) => {
+  isDragging.value = true;
+  dragStartLatLng.value = e.latlng;
+  if (map.value) {
+    map.value.dragging.disable();
+  }
+
+  // 拖拽前先禁用编辑模式
+  if ((layer as any).editing && (layer as any).editing.enabled()) {
+    (layer as any).editing.disable();
+  }
+
+  const onMove = (moveEvent: any) => {
+    if (!isDragging.value || !dragStartLatLng.value) return;
+    const dx = moveEvent.latlng.lat - dragStartLatLng.value.lat;
+    const dy = moveEvent.latlng.lng - dragStartLatLng.value.lng;
+
+    // 移动所有顶点
+    const latlngs = (layer as any).getLatLngs();
+    const newLatLngs = offsetLatLngs(latlngs, dx, dy);
+    (layer as any).setLatLngs(newLatLngs);
+
+    dragStartLatLng.value = moveEvent.latlng;
+  };
+
+  const onUp = () => {
+    isDragging.value = false;
+    if (map.value) {
+      map.value.dragging.enable();
+      map.value.off("mousemove", onMove);
+      map.value.off("mouseup", onUp);
+    }
+
+    // 重新启用编辑 - 需要重新创建 layer 才能刷新顶点
+    if (editEnabled.value) {
+      recreateLayer(layer);
+    }
+  };
+
+  if (map.value) {
+    map.value.on("mousemove", onMove);
+    map.value.on("mouseup", onUp);
+  }
+};
+
+// 重新创建图层以刷新编辑顶点
+const recreateLayer = (oldLayer: L.Layer) => {
+  const feature = features.value.find(f => f.layer === oldLayer);
+  if (!feature) return;
+
+  const latlngs = (oldLayer as any).getLatLngs();
+  const style = {
+    color: (oldLayer as any).options.color || "#3388ff",
+    weight: (oldLayer as any).options.weight || 3,
+    fillColor: (oldLayer as any).options.fillColor || "#3388ff",
+    fillOpacity: (oldLayer as any).options.fillOpacity || 0.3,
+  };
+
+  // 创建新图层
+  let newLayer: L.Polygon | L.Polyline | null = null;
+  if (feature.type === "polygon") {
+    newLayer = L.polygon(latlngs as any, style);
+  } else if (feature.type === "polyline") {
+    newLayer = L.polyline(latlngs as any, style);
+  }
+
+  if (!newLayer || !drawnItems.value) return;
+
+  // 移除旧图层
+  drawnItems.value.removeLayer(oldLayer);
+
+  // 添加新图层
+  drawnItems.value.addLayer(newLayer);
+
+  // 更新 features 引用
+  feature.layer = newLayer;
+
+  // 更新选中状态
+  if (selectedLayer.value === oldLayer) {
+    selectedLayer.value = newLayer;
+  }
+
+  // 绑定事件
+  newLayer.on("click", (evt: any) => {
+    L.DomEvent.stopPropagation(evt);
+    onLayerClick(newLayer!);
+  });
+  bindDragEvents(newLayer);
+
+  // 启用编辑
+  if (newLayer.editing) {
+    newLayer.editing.enable();
+  }
+};
+
+// 递归偏移坐标（支持多环多边形）
+const offsetLatLngs = (latlngs: any, dx: number, dy: number) => {
+  if (Array.isArray(latlngs[0])) {
+    return latlngs.map((ring: any) => offsetLatLngs(ring, dx, dy));
+  }
+  return latlngs.map((ll: any) => L.latLng(ll.lat + dx, ll.lng + dy));
+};
+
+const startDraw = (type: string) => {
+  if (!map.value) return;
+
+  // 延迟确保 Geoman 准备就绪
+  setTimeout(() => {
+    if (!map.value?.pm) {
+      return;
+    }
+
+    // 取消当前绘制模式
+    map.value.pm.disableDraw();
+
+    drawMode.value = type;
+
+    // 使用 Geoman 进行绘制
+    switch (type) {
+      case "marker":
+        map.value.pm.enableDraw('Marker', {
+          markerStyle: {
+            opacity: 0.8
+          }
+        });
+        break;
+      case "polyline":
+        // Geoman 使用 Line 而非 Polyline
+        map.value.pm.enableDraw('Line', {
+          pathOptions: {
+            color: "#3388ff",
+            weight: 3
+          }
+        });
+        break;
+      case "polygon":
+        map.value.pm.enableDraw('Polygon', {
+          pathOptions: {
+            color: "#3388ff",
+            weight: 3,
+            fillColor: "#3388ff",
+            fillOpacity: 0.3
+          }
+        });
+        break;
+    }
+  }, 300);
+};
+
+const toggleEdit = () => {
+  if (!drawnItems.value) return;
+  drawnItems.value.eachLayer((layer) => {
+    if (editEnabled.value) {
+      enableLayerEdit(layer);
+    } else {
+      disableLayerEdit(layer);
+    }
+  });
+};
+
+const enableLayerEdit = (layer: L.Layer) => {
+  // 使用 Geoman 启用编辑
+  if (layer.pm) {
+    layer.pm.enable();
+  }
+  // 点要素启用拖拽
+  if (layer instanceof L.Marker) {
+    layer.dragging?.enable();
+  }
+};
+
+const disableLayerEdit = (layer: L.Layer) => {
+  // 使用 Geoman 禁用编辑
+  if (layer.pm) {
+    layer.pm.disable();
+  }
+  if (layer instanceof L.Marker) {
+    layer.dragging?.disable();
+  }
+};
+
+const onLayerClick = (layer: L.Layer) => {
+  // 取消之前选中的高亮
+  if (selectedLayer.value && selectedLayer.value !== layer) {
+    resetLayerStyle(selectedLayer.value);
+  }
+
+  selectedLayer.value = layer;
+  highlightLayer(layer);
+};
+
+const highlightLayer = (layer: L.Layer) => {
+  if (layer instanceof L.Marker) {
+    // Marker 高亮可以通过改变图标实现
+    layer.setOpacity(0.7);
+  } else {
+    (layer as any).setStyle({ color: "#ff4444", weight: 4 });
+  }
+};
+
+const resetLayerStyle = (layer: L.Layer) => {
+  if (layer instanceof L.Marker) {
+    layer.setOpacity(1);
+  } else {
+    (layer as any).setStyle({ color: "#3388ff", weight: 3 });
+  }
+};
+
+const selectFeature = (feature: { type: string; layer: L.Layer }) => {
+  onLayerClick(feature.layer);
+  // 定位到要素
+  if (feature.layer.getBounds) {
+    map.value?.fitBounds(feature.layer.getBounds(), { padding: [50, 50] });
+  } else if (feature.layer.getLatLng) {
+    map.value?.setView(feature.layer.getLatLng(), map.value.getZoom());
+  }
+};
+
+const deleteSelected = () => {
+  if (!selectedLayer.value || !drawnItems.value) return;
+
+  drawnItems.value.removeLayer(selectedLayer.value);
+  features.value = features.value.filter((f) => f.layer !== selectedLayer.value);
+  selectedLayer.value = null;
+};
+
+const clearAll = () => {
+  if (!drawnItems.value) return;
+  drawnItems.value.clearLayers();
+  features.value = [];
+  selectedLayer.value = null;
+};
+
+const getFeatureIcon = (type: string) => {
+  const icons: Record<string, string> = {
+    marker: "📍",
+    polyline: "📏",
+    polygon: "⬡",
+  };
+  return icons[type] || "📌";
+};
+
+// 触发文件选择
+const triggerImport = () => {
+  fileInput.value?.click();
+};
+
+// 处理文件导入
+const handleFileImport = (event: Event) => {
+  const target = event.target as HTMLInputElement;
+  const file = target.files?.[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const geojson = JSON.parse(e.target?.result as string);
+      importGeoJSON(geojson);
+    } catch (err) {
+      alert("GeoJSON 解析失败: " + (err as Error).message);
+    }
+  };
+  reader.readAsText(file);
+
+  // 清空 input 以便重复选择同一文件
+  target.value = "";
+};
+
+// 导入 GeoJSON 数据
+const importGeoJSON = (geojson: any) => {
+  if (!map.value || !drawnItems.value) return;
+
+  const defaultStyle = {
+    color: "#3388ff",
+    weight: 3,
+    fillColor: "#3388ff",
+    fillOpacity: 0.3,
+  };
+
+  L.geoJSON(geojson, {
+    style: function() { return defaultStyle; },
+    pointToLayer: function(f: any, latlng: L.LatLng) {
+      return L.marker(latlng);
+    },
+    onEachFeature: (f: any, layer: L.Layer) => {
+      // 确定要素类型
+      let type = "polygon";
+      if (layer instanceof L.Marker) {
+        type = "marker";
+      } else if (layer instanceof L.Polyline && !(layer instanceof L.Polygon)) {
+        type = "polyline";
+      }
+
+      // 添加到图层组
+      drawnItems.value!.addLayer(layer);
+      features.value.push({ type, layer });
+
+      // 绑定点击事件
+      layer.on("click", (evt: any) => {
+        L.DomEvent.stopPropagation(evt);
+        onLayerClick(layer);
+      });
+
+      // 为线/面绑定拖拽
+      if (type !== "marker") {
+        bindDragEvents(layer);
+      }
+
+      // 如果编辑模式开启，启用编辑
+      if (editEnabled.value) {
+        enableLayerEdit(layer);
+      }
+    },
+  });
+
+  // 缩放到导入的数据范围
+  if (features.value.length > 0 && map.value) {
+    const bounds = drawnItems.value.getBounds();
+    if (bounds.isValid()) {
+      map.value.fitBounds(bounds, { padding: [50, 50] });
+    }
+  }
+};
+
+onMounted(() => {
+});
 </script>
 
 <style scoped>

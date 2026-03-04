@@ -16,7 +16,8 @@
   </div>
 </template>
 
-<script>
+<script setup lang="ts">
+import { ref, watch, onMounted } from 'vue'
 import { codemirror } from 'vue-codemirror'
 import 'codemirror/lib/codemirror.css'
 import 'codemirror/theme/material.css'
@@ -32,66 +33,65 @@ import 'codemirror/addon/fold/foldgutter.js'
 import 'codemirror/addon/fold/foldgutter.css'
 import 'codemirror/addon/fold/brace-fold.js'
 
-export default {
-  name: 'CodeEditor',
-  components: { codemirror },
-  props: {
-    currentRoute: {
-      type: String,
-      default: 'demo'
-    },
-    initialCode: {
-      type: String,
-      default: ''
-    }
-  },
-  data() {
-    return {
-      code: this.initialCode,
-      editorOptions: {
-        tabSize: 2,
-        mode: 'text/x-vue',
-        theme: 'material',
-        lineNumbers: true,
-        line: true,
-        autoCloseBrackets: true,
-        autoCloseTags: true,
-        foldGutter: true,
-        gutters: ['CodeMirror-linenumbers', 'CodeMirror-foldgutter']
-      }
-    }
-  },
-  watch: {
-    initialCode(val) {
-      this.code = val
-    }
-  },
-  created() {
-    // 防抖处理
-    this.debouncedEmit = this.debounce((val) => {
-      this.$emit('code-change', val)
-    }, 500)
-  },
-  methods: {
-    debounce(fn, delay) {
-      let timer = null
-      return function(...args) {
-        if (timer) clearTimeout(timer)
-        timer = setTimeout(() => fn.apply(this, args), delay)
-      }
-    },
-    onCodeChange(val) {
-      this.debouncedEmit(val)
-    },
-    runCode() {
-      this.$emit('run-code', this.code)
-    },
-    resetCode() {
-      this.code = this.initialCode
-      this.$emit('reset-code')
-    }
+const props = defineProps<{
+  currentRoute?: string
+  initialCode?: string
+}>()
+
+const emit = defineEmits<{
+  (e: 'code-change', code: string): void
+  (e: 'run-code', code: string): void
+  (e: 'reset-code'): void
+}>()
+
+const code = ref(props.initialCode || '')
+const editorOptions = ref({
+  tabSize: 2,
+  mode: 'text/x-vue',
+  theme: 'material',
+  lineNumbers: true,
+  line: true,
+  autoCloseBrackets: true,
+  autoCloseTags: true,
+  foldGutter: true,
+  gutters: ['CodeMirror-linenumbers', 'CodeMirror-foldgutter']
+})
+
+let debouncedEmit: ((val: string) => void) | null = null
+
+function debounce(fn: Function, delay: number) {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  return function(...args: any[]) {
+    if (timer) clearTimeout(timer)
+    timer = setTimeout(() => fn.apply(this, args), delay)
   }
 }
+
+const onCodeChange = (val: string) => {
+  if (debouncedEmit) {
+    debouncedEmit(val)
+  }
+}
+
+const runCode = () => {
+  emit('run-code', code.value)
+}
+
+const resetCode = () => {
+  code.value = props.initialCode || ''
+  emit('reset-code')
+}
+
+watch(() => props.initialCode, (val) => {
+  code.value = val || ''
+})
+
+onMounted(() => {
+  // 防抖处理
+  debouncedEmit = debounce((val: string) => {
+    emit('code-change', val)
+  }, 500)
+})
 </script>
 
 <style scoped>
@@ -122,12 +122,12 @@ export default {
   gap: 8px;
 }
 
-.code-editor >>> .vue-codemirror {
+.code-editor :deep(.vue-codemirror) {
   flex: 1;
   overflow: hidden;
 }
 
-.code-editor >>> .CodeMirror {
+.code-editor :deep(.CodeMirror) {
   height: 100%;
   font-size: 14px;
   font-family: 'Fira Code', 'Monaco', monospace;

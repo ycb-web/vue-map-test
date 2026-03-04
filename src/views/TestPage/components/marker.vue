@@ -35,64 +35,56 @@
   </div>
 </template>
 
-<script>
+<script setup lang="ts">
+import { computed } from 'vue'
 import arrowImg from "../assets/img/长箭头.png";
-import store from "@/store/testPage.js";
+import { useTestPageStore } from "@/store/testPage";
 
-export default {
-  name: "CircleMarker",
-  store: store,
-  data: function () {
-    return {
-      arrowImg: arrowImg,
-    };
-  },
-  props: {
-    id: { type: [Number, String], required: true },
-    size: { type: Number, default: 30 },
-    arrowLength: { type: Number, default: 50 },
-    bgColor: { type: String, default: "#1890ff" },
-    textColor: { type: String, default: "#fff" },
-  },
-  computed: {
-    // 从 Vuex store 获取当前站点数据
-    pointData: function () {
-      return this.$store.getters.getPointById(this.id);
-    },
-    // 从 store 获取标签显示状态
-    labelVisible: function () {
-      return this.$store.getters.showLabel;
-    },
-    wrapperStyle: function () {
-      return {
-        width: this.arrowLength + "px",
-        height: this.arrowLength + "px",
-      };
-    },
-    circleStyle: function () {
-      return {
-        width: this.size + "px",
-        height: this.size + "px",
-        backgroundColor: this.bgColor,
-        color: this.textColor,
-        fontSize: Math.max(10, this.size * 0.4) + "px",
-      };
-    },
-    arrowStyle: function () {
-      var direction = this.pointData.direction || 0;
-      return {
-        width: this.arrowLength + "px",
-        height: this.arrowLength + "px",
-        transform: "rotate(" + direction + "deg)",
-      };
-    },
-  },
-  methods: {
-    handleClick: function () {
-      this.$emit("click", this.pointData);
-    },
-  },
-};
+const props = defineProps({
+  id: { type: [Number, String], required: true },
+  size: { type: Number, default: 30 },
+  arrowLength: { type: Number, default: 50 },
+  bgColor: { type: String, default: "#1890ff" },
+  textColor: { type: String, default: "#fff" },
+});
+
+const testPageStore = useTestPageStore();
+
+// 从 Pinia store 获取当前站点数据
+const pointData = computed(() => {
+  return testPageStore.getPointById(props.id);
+});
+
+// 从 store 获取标签显示状态
+const labelVisible = computed(() => {
+  return testPageStore.showLabel;
+});
+
+const wrapperStyle = computed(() => {
+  return {
+    width: props.arrowLength + "px",
+    height: props.arrowLength + "px",
+  };
+});
+
+const circleStyle = computed(() => {
+  return {
+    width: props.size + "px",
+    height: props.size + "px",
+    backgroundColor: props.bgColor,
+    color: props.textColor,
+    fontSize: Math.max(10, props.size * 0.4) + "px",
+  };
+});
+
+const arrowStyle = computed(() => {
+  const direction = pointData.value.direction || 0;
+  return {
+    width: props.arrowLength + "px",
+    height: props.arrowLength + "px",
+    transform: "rotate(" + direction + "deg)",
+  };
+});
 </script>
 
 <style scoped>

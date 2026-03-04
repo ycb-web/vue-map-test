@@ -8,7 +8,7 @@
       <router-link to="/contour" class="nav-link">等值线</router-link>
       <router-link to="/edit" class="nav-link">编辑</router-link>
       <router-link to="/leader" class="nav-link">线引</router-link>
-      <router-link to="/playground" class="nav-link playground-link">🎮 演练场</router-link>
+      <router-link to="/playground" class="nav-link playground-link">演练场</router-link>
     </nav>
     <div class="page-container">
       <keep-alive>
@@ -18,10 +18,8 @@
   </div>
 </template>
 
-<script>
-export default {
-  name: "App",
-};
+<script setup lang="ts">
+// App 组件逻辑 - 主要是路由容器，基本不需要额外逻辑
 </script>
 
 <style>

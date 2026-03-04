@@ -59,147 +59,146 @@
   </div>
 </template>
 
-<script>
+<script setup lang="ts">
+import { ref, onMounted, onUnmounted } from 'vue'
 import L from "leaflet";
 import mapUtils from "../utils/map.js";
 
-export default {
-  name: "ContourPage",
-  data() {
-    return {
-      map: null,
-      showScalarField: true,
-      showContour: true,
-      showLabels: true,
-      scalarOpacity: 0.6,
-      lineWidth: 1.5,
-      loading: false,
-      presData: null,
-      contourData: null,
-    };
-  },
-  mounted() {
-    this.initMap();
-    this.loadData();
-  },
-  beforeDestroy() {
-    if (this.map) {
-      mapUtils.removeScalarFieldLayer(this.map);
-      mapUtils.removeContourLayer(this.map);
-      this.map.remove();
-      this.map = null;
-    }
-  },
-  methods: {
-    initMap() {
-      this.map = L.map("contour-map", {
-        zoom: 4,
-        maxZoom: 10,
-        minZoom: 2,
-        zoomControl: true,
-      }).setView([35, 120], 4);
+const map = ref<L.Map | null>(null)
+const showScalarField = ref(true)
+const showContour = ref(true)
+const showLabels = ref(true)
+const scalarOpacity = ref(0.6)
+const lineWidth = ref(1.5)
+const loading = ref(false)
+const presData = ref<any>(null)
+const contourData = ref<any>(null)
 
-      L.tileLayer(
-        "https://t0.tianditu.gov.cn/img_w/wmts?tk=93724b915d1898d946ca7dc7b765dda5&SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=img&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TileMatrix={z}&TileCol={x}&TileRow={y}",
-        { maxZoom: 18 }
-      ).addTo(this.map);
-    },
-    
-    async loadData() {
-      this.loading = true;
-      try {
-        // 并行加载两个数据文件
-        const [presRes, contourRes] = await Promise.all([
-          fetch("./data/pres.json"),
-          fetch("./data/pres-contour.json"),
-        ]);
-        
-        this.presData = await presRes.json();
-        this.contourData = await contourRes.json();
-        
-        // 数据加载完成后添加图层
-        if (this.showScalarField) {
-          this.addScalarField();
-        }
-        if (this.showContour) {
-          this.addContour();
-        }
-      } catch (error) {
-        console.error("数据加载失败:", error);
-      } finally {
-        this.loading = false;
-      }
-    },
-    
-    addScalarField() {
-      if (!this.presData) return;
-      
-      const header = this.presData[0].header;
-      // 从 JSON 中获取图片路径，或使用本地路径
-      const imageUrl = "./data/pres_u.png";
-      
-      mapUtils.addScalarFieldLayer(this.map, {
-        header: header,
-        imageUrl: imageUrl,
-      }, {
-        opacity: this.scalarOpacity,
-      });
-    },
-    
-    addContour() {
-      if (!this.contourData) return;
-      
-      mapUtils.addContourLayer(this.map, this.contourData, {
-        lineWidth: this.lineWidth,
-        opacity: 0.9,
-        showLabels: this.showLabels,
-      });
-    },
-    
-    toggleScalarField() {
-      if (this.showScalarField) {
-        this.addScalarField();
-        // 确保等值线在上层
-        if (this.showContour && this.contourData) {
-          mapUtils.removeContourLayer(this.map);
-          this.addContour();
-        }
-      } else {
-        mapUtils.removeScalarFieldLayer(this.map);
-      }
-    },
-    
-    toggleContour() {
-      if (this.showContour) {
-        this.addContour();
-      } else {
-        mapUtils.removeContourLayer(this.map);
-      }
-    },
-    
-    toggleLabels() {
-      mapUtils.toggleContourLabels(this.map, this.showLabels);
-    },
-    
-    updateScalarOpacity() {
-      if (this.showScalarField && this.presData) {
-        mapUtils.removeScalarFieldLayer(this.map);
-        this.addScalarField();
-        // 重新添加等值线保持在上层
-        if (this.showContour && this.contourData) {
-          mapUtils.removeContourLayer(this.map);
-          this.addContour();
-        }
-      }
-    },
-    
-    updateStyle() {
-      mapUtils.updateContourStyle(this.map, {
-        lineWidth: this.lineWidth,
-      });
-    },
-  },
+const initMap = () => {
+  map.value = L.map("contour-map", {
+    zoom: 4,
+    maxZoom: 10,
+    minZoom: 2,
+    zoomControl: true,
+  }).setView([35, 120], 4);
+
+  L.tileLayer(
+    "https://t0.tianditu.gov.cn/img_w/wmts?tk=93724b915d1898d946ca7dc7b765dda5&SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=img&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TileMatrix={z}&TileCol={x}&TileRow={y}",
+    { maxZoom: 18 }
+  ).addTo(map.value);
 };
+
+const loadData = async () => {
+  loading.value = true;
+  try {
+    // 并行加载两个数据文件
+    const [presRes, contourRes] = await Promise.all([
+      fetch("./data/pres.json"),
+      fetch("./data/pres-contour.json"),
+    ]);
+
+    presData.value = await presRes.json();
+    contourData.value = await contourRes.json();
+
+    // 数据加载完成后添加图层
+    if (showScalarField.value) {
+      addScalarField();
+    }
+    if (showContour.value) {
+      addContour();
+    }
+  } catch (error) {
+    console.error("数据加载失败:", error);
+  } finally {
+    loading.value = false;
+  }
+};
+
+const addScalarField = () => {
+  if (!presData.value || !map.value) return;
+
+  const header = presData.value[0].header;
+  // 从 JSON 中获取图片路径，或使用本地路径
+  const imageUrl = "./data/pres_u.png";
+
+  mapUtils.addScalarFieldLayer(map.value, {
+    header: header,
+    imageUrl: imageUrl,
+  }, {
+    opacity: scalarOpacity.value,
+  });
+};
+
+const addContour = () => {
+  if (!contourData.value || !map.value) return;
+
+  mapUtils.addContourLayer(map.value, contourData.value, {
+    lineWidth: lineWidth.value,
+    opacity: 0.9,
+    showLabels: showLabels.value,
+  });
+};
+
+const toggleScalarField = () => {
+  if (showScalarField.value) {
+    addScalarField();
+    // 确保等值线在上层
+    if (showContour.value && contourData.value && map.value) {
+      mapUtils.removeContourLayer(map.value);
+      addContour();
+    }
+  } else if (map.value) {
+    mapUtils.removeScalarFieldLayer(map.value);
+  }
+};
+
+const toggleContour = () => {
+  if (showContour.value) {
+    addContour();
+  } else if (map.value) {
+    mapUtils.removeContourLayer(map.value);
+  }
+};
+
+const toggleLabels = () => {
+  if (map.value) {
+    mapUtils.toggleContourLabels(map.value, showLabels.value);
+  }
+};
+
+const updateScalarOpacity = () => {
+  if (showScalarField.value && presData.value && map.value) {
+    mapUtils.removeScalarFieldLayer(map.value);
+    addScalarField();
+    // 重新添加等值线保持在上层
+    if (showContour.value && contourData.value) {
+      mapUtils.removeContourLayer(map.value);
+      addContour();
+    }
+  }
+};
+
+const updateStyle = () => {
+  if (map.value) {
+    mapUtils.updateContourStyle(map.value, {
+      lineWidth: lineWidth.value,
+    });
+  }
+};
+
+onMounted(() => {
+  initMap();
+  loadData();
+});
+
+onUnmounted(() => {
+  if (map.value) {
+    mapUtils.removeScalarFieldLayer(map.value);
+    mapUtils.removeContourLayer(map.value);
+    map.value.remove();
+    map.value = null;
+  }
+});
 </script>
 
 <style scoped>
@@ -256,7 +255,7 @@ export default {
 }
 .legend-gradient {
   height: 12px;
-  background: linear-gradient(to right, 
+  background: linear-gradient(to right,
     rgb(180,180,180),
     rgb(255,255,255),
     rgb(0,255,174),

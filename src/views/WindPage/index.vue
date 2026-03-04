@@ -1,19 +1,3 @@
-<!--
-  WindPage 风场可视化页面
-  ========================
-  
-  功能概述：
-  - 基于Leaflet的风场数据可视化
-  - 支持多种图层：颜色图层、粒子图层、箭头图层、风杆图层
-  - 集成PlaybackBar播放轴组件，用于时间序列数据播放
-  - 集成ECharts图表展示
-  
-  页面布局：
-  - 全屏地图容器
-  - 顶部居中：MapToolbar工具栏
-  - 右侧：图层控制面板（可折叠）
-  - 底部：ECharts图表 + PlaybackBar播放轴
--->
 <template>
   <div class="wind-page">
     <!-- 地图容器 -->
@@ -24,25 +8,6 @@
 
     <!-- ECharts图表容器 -->
     <div v-if="showChart" class="chart-container" id="chart"></div>
-
-    <!-- 
-      播放轴组件（暂时注释）
-      Props说明：
-      - playing: 播放状态（双向绑定）
-      - progress: 当前进度索引（双向绑定）
-      - available-times: 时间点数组，格式如['00:00', '01:00', ...]
-      - time-colors: 每个时间点的颜色，用于播放轴分段着色
-      - time-dates: 每个时间点的日期，用于日期刻度显示
-    -->
-    <!-- <PlaybackBar
-      class="playback-bar"
-      :playing.sync="playing"
-      :progress.sync="playbackProgress"
-      :available-times="availableTimes"
-      :time-colors="timeColors"
-      :time-dates="timeDates"
-      @progress-change="handleProgressChange"
-    /> -->
 
     <!-- 图层控制面板 - 可折叠 -->
     <div class="controls" :class="{ collapsed: panelCollapsed }">
@@ -270,14 +235,14 @@
   </div>
 </template>
 
-<script>
+<script setup lang="ts">
+import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import L from "leaflet";
 import "@/utils/leaflet-vector-scalar";
 import chartData from "@/assets/chartData.json";
 import * as echarts from "echarts";
 import { getProcessLineOption } from "@/utils/getProcessLineOption";
-import MapToolbar from "@/components/MapToolbar";
-import PlaybackBar from "./components/PlaybackBar.vue";
+import MapToolbar from "@/components/MapToolbar/index.vue";
 import waveData from "@/assets/wave.json";
 
 // 风场数据文件路径（放在 public 目录，通过 HTTP 请求加载）
@@ -289,703 +254,529 @@ const WIND_DATA_FILES = [
   "/data/winJson/wind_parsed_20260126000000.json",
 ];
 
-/**
- * WindPage 风场可视化页面组件
- *
- * @description 展示风场数据的地图可视化页面，集成多种图层和播放控制功能
- */
-export default {
-  name: "WindPage",
-  components: {
-    MapToolbar,
-    PlaybackBar,
-  },
+// ========== 地图相关 ==========
+const map = ref<L.Map | null>(null)
 
-  /**
-   * 组件数据
-   */
-  data() {
-    return {
-      // ========== 地图相关 ==========
-      /** Leaflet地图实例 */
-      map: null,
+// ========== 图层显示状态 ==========
+const dataType = ref('wind')
+const showScalar = ref(true)
+const showVector = ref(true)
+const showArrow = ref(false)
+const showWave = ref(true)
+const showWaveScalar = ref(true)
+const showBarb = ref(false)
+const showChart = ref(false)
 
-      // ========== 图层显示状态 ==========
-      /** 当前数据类型：wind 或 wave */
-      dataType: 'wind',
-      /** 是否显示颜色图层（标量场） */
-      showScalar: true,
-      /** 是否显示粒子图层（矢量场动画） */
-      showVector: true,
-      /** 是否显示箭头图层 */
-      showArrow: false,
-      /** 是否显示浪效果图层 */
-      showWave: true,
-      /** 是否显示浪场颜色图层 */
-      showWaveScalar: true,
-      /** 是否显示风杆图层 */
-      showBarb: false,
-      /** 是否显示单点过程线图表 */
-      showChart: false,
+// ========== 图层实例 ==========
+const chart = ref<echarts.ECharts | null>(null)
+const scalarLayer = ref<any>(null)
+const velocityLayer = ref<any>(null)
+const arrowLayer = ref<any>(null)
+const waveLayer = ref<any>(null)
+const waveScalarLayer = ref<any>(null)
+const barbLayer = ref<any>(null)
+const tileScalarLayer = ref<any>(null)
 
-      // ========== 图层实例 ==========
-      /** ECharts图表实例 */
-      chart: null,
-      /** 标量图层实例 */
-      scalarLayer: null,
-      /** 粒子图层实例 */
-      velocityLayer: null,
-      /** 箭头图层实例 */
-      arrowLayer: null,
-      /** 浪效果图层实例 */
-      waveLayer: null,
-      /** 浪场颜色图层实例 */
-      waveScalarLayer: null,
-      /** 风杆图层实例 */
-      barbLayer: null,
-      /** 瓦片标量图层实例 */
-      tileScalarLayer: null,
+// ========== UI状态 ==========
+const panelCollapsed = ref(false)
 
-      // ========== UI状态 ==========
-      /** 控制面板折叠状态 */
-      panelCollapsed: false,
+// ========== 颜色图层参数 ==========
+const scalarOpacity = ref(0.4)
+const scalarMaxValue = ref(30)
 
-      // ========== 颜色图层参数 ==========
-      /** 颜色图层透明度 (0-1) */
-      scalarOpacity: 0.4,
-      /** 颜色图层最大值（风速≥此值显示最深色） */
-      scalarMaxValue: 30,
+// ========== 箭头图层参数 ==========
+const arrowDynamicColor = ref(true)
+const arrowDynamicSize = ref(true)
+const arrowAlignToGrid = ref(false)
+const arrowGridSize = ref(40)
 
-      // ========== 箭头图层参数 ==========
-      /** 箭头是否使用动态颜色（根据风速变化） */
-      arrowDynamicColor: true,
-      /** 箭头是否使用动态大小（根据风速变化） */
-      arrowDynamicSize: true,
-      /** 箭头是否对齐网格 */
-      arrowAlignToGrid: false,
-      /** 箭头网格间距（像素） */
-      arrowGridSize: 40,
+// ========== 浪效果图层参数 ==========
+const waveSpeed = ref(0.020)
+const waveScalarOpacity = ref(0.4)
 
-      // ========== 浪效果图层参数 ==========
-      /** 浪粒子速度 */
-      waveSpeed: 0.020,
-      /** 浪场颜色图层透明度 */
-      waveScalarOpacity: 0.4,
+// ========== 风场数据 ==========
+const windDataList = ref<(any | null)[]>([null, null, null, null, null])
+const currentWindData = ref<any>(null)
+const dataLoading = ref(false)
 
-      // ========== 风场数据 ==========
-      /** 5天的风场数据数组，每天一份（动态加载） */
-      windDataList: [null, null, null, null, null],
-      /** 当前显示的风场数据 */
-      currentWindData: null,
-      /** 数据加载状态 */
-      dataLoading: false,
+// ========== 播放轴相关 ==========
+const playing = ref(false)
+const playbackProgress = ref(0)
 
-      // ========== 播放轴相关 ==========
-      /** 播放状态 */
-      playing: false,
-      /** 当前播放进度（时间点索引） */
-      playbackProgress: 0,
+const availableTimes = ref(generateTestTimes())
+const timeColors = ref(generateTestColors())
+const timeDates = ref(generateTestDates())
 
-      /**
-       * 测试数据：可用时间点数组
-       * 格式：['00:00', '01:00', ..., '23:00'] × 5天 = 120个时间点
-       * @see generateTestTimes
-       */
-      availableTimes: this.generateTestTimes(),
-
-      /**
-       * 测试数据：每个时间点的颜色
-       * 用于播放轴分段着色和滑块颜色
-       * 5天分别使用：橙、橙、绿、绿、蓝
-       * @see generateTestColors
-       */
-      timeColors: this.generateTestColors(),
-
-      /**
-       * 测试数据：每个时间点的日期
-       * 格式：'2026年1月21日'
-       * @see generateTestDates
-       */
-      timeDates: this.generateTestDates(),
-    };
-  },
-  mounted() {
-    this.initMap();
-    // 加载第一天的风场数据
-    this.loadWindData(0);
-    // 图表默认关闭，不自动初始化
-    // if (this.showChart) this.initChart();
-  },
-
-  beforeDestroy() {
-    if (this.map) {
-      this.map.remove();
-      this.map = null;
+function generateTestTimes() {
+  const times = [];
+  for (let d = 0; d < 5; d++) {
+    for (let h = 0; h < 24; h++) {
+      times.push(`${String(h).padStart(2, "0")}:00`);
     }
-    if (this.chart) {
-      this.chart.dispose();
-      this.chart = null;
+  }
+  return times;
+}
+
+function generateTestColors() {
+  const colors = [];
+  // 5天的颜色配置：第1-2天橙色，第3-4天绿色，第5天蓝色
+  const colorMap = ["#f5a623", "#f5a623", "#7ed321", "#7ed321", "#4a90d9"];
+  for (let d = 0; d < 5; d++) {
+    for (let h = 0; h < 24; h++) {
+      colors.push(colorMap[d]);
     }
-  },
+  }
+  return colors;
+}
 
-  methods: {
-    // ==========================================
-    // 数据类型切换
-    // ==========================================
+function generateTestDates() {
+  const dates = [];
+  const today = new Date();
+  for (let d = 0; d < 5; d++) {
+    const date = new Date(today.getTime() + d * 86400000);
+    const dateStr = `${date.getFullYear()}年${
+      date.getMonth() + 1
+    }月${date.getDate()}日`;
+    // 每天24小时，每小时一个相同的日期
+    for (let h = 0; h < 24; h++) {
+      dates.push(dateStr);
+    }
+  }
+  return dates;
+}
 
-    /**
-     * 切换数据类型（风/浪）
-     * 切换时隐藏另一类型的所有图层
-     */
-    switchDataType() {
-      if (this.dataType === 'wind') {
-        // 切换到风场：隐藏浪图层，显示风图层
-        this.hideWaveLayers();
-        this.showWindLayers();
-      } else {
-        // 切换到浪场：隐藏风图层，显示浪图层
-        this.hideWindLayers();
-        this.showWaveLayers();
-      }
-    },
+// ==========================================
+// 数据类型切换
+// ==========================================
 
-    /**
-     * 隐藏所有风场图层
-     */
-    hideWindLayers() {
-      if (this.tileScalarLayer) {
-        this.map.removeLayer(this.tileScalarLayer);
-        this.tileScalarLayer = null;
-      }
-      if (this.velocityLayer) {
-        try {
-          this.velocityLayer.onRemove(this.map);
-        } catch (e) {}
-        this.velocityLayer = null;
-      }
-      if (this.arrowLayer) {
-        this.map.removeLayer(this.arrowLayer);
-        this.arrowLayer = null;
-      }
-      if (this.barbLayer) {
-        this.map.removeLayer(this.barbLayer);
-        this.barbLayer = null;
-      }
-    },
-
-    /**
-     * 显示风场图层（根据当前勾选状态）
-     */
-    showWindLayers() {
-      if (this.showScalar && !this.tileScalarLayer) {
-        this.addScalarLayer();
-      }
-      if (this.showVector && !this.velocityLayer) {
-        this.addVectorLayer();
-      }
-      if (this.showArrow && !this.arrowLayer) {
-        this.addArrowLayer();
-      }
-      if (this.showBarb && !this.barbLayer) {
-        this.addBarbLayer();
-      }
-    },
-
-    /**
-     * 隐藏浪场图层
-     */
-    hideWaveLayers() {
-      if (this.waveLayer) {
-        this.map.removeLayer(this.waveLayer);
-        this.waveLayer = null;
-      }
-      if (this.waveScalarLayer) {
-        this.map.removeLayer(this.waveScalarLayer);
-        this.waveScalarLayer = null;
-      }
-    },
-
-    /**
-     * 显示浪场图层（根据当前勾选状态）
-     */
-    showWaveLayers() {
-      if (this.showWaveScalar && !this.waveScalarLayer) {
-        this.addWaveScalarLayer();
-      }
-      if (this.showWave && !this.waveLayer) {
-        this.addWaveLayer();
-      }
-    },
-
-    // ==========================================
-    // 测试数据生成方法
-    // 用于PlaybackBar组件的演示和测试
-    // ==========================================
-
-    /**
-     * 生成5天的时间数据
-     * 每天24小时，共120个时间点
-     * @returns {Array<String>} 时间数组，格式如['00:00', '01:00', ...]
-     */
-    generateTestTimes() {
-      const times = [];
-      for (let d = 0; d < 5; d++) {
-        for (let h = 0; h < 24; h++) {
-          times.push(`${String(h).padStart(2, "0")}:00`);
-        }
-      }
-      return times;
-    },
-
-    /**
-     * 生成对应的颜色数据
-     * 5天分别使用不同颜色：橙、橙、绿、绿、蓝
-     * 用于播放轴的分段着色
-     * @returns {Array<String>} 颜色数组，每个时间点一个颜色
-     */
-    generateTestColors() {
-      const colors = [];
-      // 5天的颜色配置：第1-2天橙色，第3-4天绿色，第5天蓝色
-      const colorMap = ["#f5a623", "#f5a623", "#7ed321", "#7ed321", "#4a90d9"];
-      for (let d = 0; d < 5; d++) {
-        for (let h = 0; h < 24; h++) {
-          colors.push(colorMap[d]);
-        }
-      }
-      return colors;
-    },
-
-    /**
-     * 生成对应的日期数据
-     * 从今天开始连续5天
-     * @returns {Array<String>} 日期数组，格式如['2026年1月21日', ...]
-     */
-    generateTestDates() {
-      const dates = [];
-      const today = new Date();
-      for (let d = 0; d < 5; d++) {
-        const date = new Date(today.getTime() + d * 86400000);
-        const dateStr = `${date.getFullYear()}年${
-          date.getMonth() + 1
-        }月${date.getDate()}日`;
-        // 每天24小时，每小时一个相同的日期
-        for (let h = 0; h < 24; h++) {
-          dates.push(dateStr);
-        }
-      }
-      return dates;
-    },
-
-    // ==========================================
-    // 播放轴事件处理
-    // ==========================================
-
-    /**
-     * 加载指定天数的风场数据
-     * @param {Number} dayIndex - 天数索引 (0-4)
-     */
-    async loadWindData(dayIndex) {
-      // 如果已经加载过，直接使用缓存
-      if (this.windDataList[dayIndex]) {
-        this.currentWindData = this.windDataList[dayIndex];
-        this.updateWindLayers();
-        return;
-      }
-
-      this.dataLoading = true;
-      try {
-        const response = await fetch(WIND_DATA_FILES[dayIndex]);
-        const data = await response.json();
-        this.windDataList[dayIndex] = data;
-        this.currentWindData = data;
-        this.updateWindLayers();
-        console.log("加载风场数据成功: 第", dayIndex + 1, "天");
-      } catch (error) {
-        console.error("加载风场数据失败:", error);
-      } finally {
-        this.dataLoading = false;
-      }
-    },
-
-    /**
-     * 播放进度变化处理
-     * 当用户拖拽滑块或自动播放时触发
-     * 根据当前时间点索引切换对应的风场数据
-     * @param {Number} progress - 当前时间点索引 (0-119)
-     */
-    handleProgressChange(progress) {
-      // 计算当前是第几天 (0-4)
-      const dayIndex = Math.floor(progress / 24);
-      const cachedData = this.windDataList[dayIndex];
-
-      // 只有当天数变化时才更新风场数据
-      if (cachedData !== this.currentWindData) {
-        this.loadWindData(dayIndex);
-      }
-    },
-
-    /**
-     * 更新所有风场图层的数据
-     */
-    updateWindLayers() {
-      if (!this.currentWindData) return;
-      // 只有当前是风场模式才更新风场图层
-      if (this.dataType !== 'wind') return;
-
-      // 更新或创建颜色图层
-      if (this.showScalar) {
-        if (this.tileScalarLayer) {
-          this.tileScalarLayer.setData(this.currentWindData);
-        } else {
-          this.addScalarLayer();
-        }
-      }
-      // 更新或创建粒子图层
-      if (this.showVector) {
-        if (this.velocityLayer) {
-          this.velocityLayer.setData(this.currentWindData);
-        } else {
-          this.addVectorLayer();
-        }
-      }
-      // 更新箭头图层
-      if (this.arrowLayer) {
-        this.arrowLayer.setData(this.currentWindData);
-      }
-      // 更新风杆图层
-      if (this.barbLayer) {
-        this.barbLayer.setData(this.currentWindData);
-      }
-    },
-
-    // ==========================================
-    // 以下为地图和图表相关方法
-    // ==========================================
-
-    /**
-     * 获取今天的日期字符串
-     * @returns {String} 格式如'2026-01-21'
-     */
-    getTodayDate() {
-      const now = new Date();
-      const year = now.getFullYear();
-      const month = String(now.getMonth() + 1).padStart(2, "0");
-      const day = String(now.getDate()).padStart(2, "0");
-      return `${year}-${month}-${day}`;
-    },
-
-    /**
-     * 初始化ECharts图表
-     */
-    initChart() {
-      this.chart = echarts.init(document.getElementById("chart"));
-      const option = getProcessLineOption(chartData);
-      this.chart.setOption(option);
-      window.addEventListener("resize", this.handleResize);
-    },
-
-    /**
-     * 窗口大小变化时重绘图表
-     */
-    handleResize() {
-      this.chart && this.chart.resize();
-    },
-
-    /**
-     * 初始化Leaflet地图
-     */
-    initMap() {
-      this.map = L.map("wind-map", {
-        maxZoom: 16,
-        zoomControl: false,
-        zoomAnimation: true,
-      });
-
-      // 图层在数据加载完成后由 updateWindLayers 初始化
-    },
-
-    /**
-     * 添加颜色图层（标量场可视化）
-     */
-    addScalarLayer() {
-      const config = {
-        minValue: 0.01,
-        maxValue: this.scalarMaxValue,
-        overlayOpacity: this.scalarOpacity,
-      };
-      this.tileScalarLayer = L.scalarTileLayer(config);
-      this.tileScalarLayer.addTo(this.map);
-      this.tileScalarLayer.setData(this.currentWindData);
-    },
-
-    /**
-     * 更新颜色图层透明度
-     */
-    updateScalarOpacity() {
-      if (this.tileScalarLayer) {
-        this.tileScalarLayer.setOverlayOpacity(this.scalarOpacity);
-      }
-    },
-
-    /**
-     * 更新颜色图层最大值
-     */
-    updateScalarMaxValue() {
-      if (this.tileScalarLayer) {
-        this.tileScalarLayer.setMaxValue(this.scalarMaxValue);
-      }
-    },
-
-    /**
-     * 添加粒子图层（矢量场动画）
-     */
-    addVectorLayer() {
-      const options = {
-        colorScale: [
-          "rgb(222,255,253)",
-          "rgb(234,234,234)",
-          "rgb(255,255,255)",
-          "rgb(156,156,156)",
-          "rgb(255,106,43)",
-        ],
-        opacity: 0.7,
-        maxVelocity: 35,
-        lineWidth: 1,
-        particleMultiplier: 1 / 500,
-        frameRate: 20,
-      };
-      this.velocityLayer = new L.velocityLayer({
-        displayValues: false,
-        displayOptions: {
-          velocityType: "",
-          displayPosition: "",
-          displayEmptyString: "",
-        },
-        ...options,
-      });
-      this.velocityLayer.setData(this.currentWindData);
-      this.velocityLayer.onAdd(this.map);
-    },
-
-    /**
-     * 添加箭头图层
-     */
-    addArrowLayer() {
-      // 动态颜色回调 - 根据风速返回不同颜色
-      const getColor = this.arrowDynamicColor
-        ? (speed) => {
-            if (speed < 5) return "#00ff00";
-            if (speed < 10) return "#ffff00";
-            if (speed < 15) return "#ff9900";
-            if (speed < 20) return "#ff0000";
-            return "#ff00ff";
-          }
-        : null;
-
-      // 动态大小回调 - 根据风速返回不同大小
-      const getSize = this.arrowDynamicSize
-        ? (speed) => Math.min(35, 12 + speed * 1.2)
-        : null;
-
-      this.arrowLayer = L.vectorArrowLayer({
-        color: this.arrowDynamicColor ? "#ffffff" : "white",
-        arrowSize: 20,
-        gridSize: this.arrowGridSize,
-        getColor: getColor,
-        getSize: getSize,
-        alignToGrid: this.arrowAlignToGrid,
-      });
-      this.arrowLayer.addTo(this.map);
-      this.arrowLayer.setData(this.currentWindData);
-    },
-
-    /**
-     * 更新箭头图层（重新创建）
-     */
-    updateArrowLayer() {
-      if (this.arrowLayer) {
-        this.map.removeLayer(this.arrowLayer);
-        this.arrowLayer = null;
-      }
-      if (this.showArrow) {
-        this.addArrowLayer();
-      }
-    },
-
-    /**
-     * 添加风杆图层
-     */
-    addBarbLayer() {
-      this.barbLayer = L.vectorBarbLayer({
-        color: "#333333",
-        barbSize: 30,
-        gridSize: 60,
-      });
-      this.barbLayer.addTo(this.map);
-      this.barbLayer.setData(this.currentWindData);
-    },
-
-    /**
-     * 切换颜色图层显示
-     */
-    toggleScalar() {
-      if (this.showScalar) {
-        this.addScalarLayer();
-      } else if (this.tileScalarLayer) {
-        this.map.removeLayer(this.tileScalarLayer);
-        this.tileScalarLayer = null;
-      }
-    },
-
-    /**
-     * 切换粒子图层显示
-     */
-    toggleVector() {
-      if (this.showVector) {
-        try {
-          this.addVectorLayer();
-        } catch (error) {
-          console.error("粒子图层加载失败，数据格式可能不兼容:", error);
-          this.showVector = false;
-          alert("粒子图层暂不支持当前数据格式");
-        }
-      } else if (this.velocityLayer) {
-        try {
-          this.velocityLayer.onRemove(this.map);
-          this.velocityLayer = null;
-        } catch (error) {
-          console.error("粒子图层移除失败:", error);
-        }
-      }
-    },
-
-    /**
-     * 切换箭头图层显示
-     */
-    toggleArrow() {
-      if (this.showArrow) {
-        this.addArrowLayer();
-      } else if (this.arrowLayer) {
-        this.map.removeLayer(this.arrowLayer);
-        this.arrowLayer = null;
-      }
-    },
-
-    /**
-     * 添加浪场颜色图层
-     */
-    addWaveScalarLayer() {
-      const config = {
-        minValue: 0.01,
-        maxValue: 10,
-        overlayOpacity: this.waveScalarOpacity,
-      };
-      this.waveScalarLayer = L.scalarTileLayer(config);
-      this.waveScalarLayer.addTo(this.map);
-      this.waveScalarLayer.setData(waveData);
-    },
-
-    /**
-     * 切换浪场颜色图层显示
-     */
-    toggleWaveScalar() {
-      if (this.showWaveScalar) {
-        this.addWaveScalarLayer();
-      } else if (this.waveScalarLayer) {
-        this.map.removeLayer(this.waveScalarLayer);
-        this.waveScalarLayer = null;
-      }
-    },
-
-    /**
-     * 更新浪场颜色图层透明度
-     */
-    updateWaveScalarOpacity() {
-      if (this.waveScalarLayer) {
-        this.waveScalarLayer.setOverlayOpacity(this.waveScalarOpacity);
-      }
-    },
-
-    /**
-     * 添加浪效果图层
-     */
-    addWaveLayer() {
-      // 浪粒子图层（白色短横线沿浪向推进）
-      this.waveLayer = L.waveParticleLayer({
-        color: 'rgba(255, 255, 255, 0.9)',
-        lineWidth: 2,
-        lineLength: 6,  // 缩小到原来的三分之二
-        particleMultiplier: 1 / 500,
-        particleAge: 35,
-        frameRate: 20,
-        opacity: 0.8,
-        velocityScale: this.waveSpeed,
-      });
-      this.waveLayer.addTo(this.map);
-      this.waveLayer.setData(waveData);
-    },
-
-    /**
-     * 切换浪效果图层显示
-     */
-    toggleWave() {
-      if (this.showWave) {
-        this.addWaveLayer();
-      } else if (this.waveLayer) {
-        this.map.removeLayer(this.waveLayer);
-        this.waveLayer = null;
-      }
-    },
-
-    /**
-     * 更新浪效果图层参数（重新创建）
-     */
-    updateWaveLayer() {
-      if (this.waveLayer) {
-        this.map.removeLayer(this.waveLayer);
-        this.waveLayer = null;
-      }
-      if (this.showWave) {
-        this.addWaveLayer();
-      }
-    },
-
-    /**
-     * 切换风杆图层显示
-     */
-    toggleBarb() {
-      if (this.showBarb) {
-        this.addBarbLayer();
-      } else if (this.barbLayer) {
-        this.map.removeLayer(this.barbLayer);
-        this.barbLayer = null;
-      }
-    },
-
-    /**
-     * 切换单点过程线图表显示
-     */
-    toggleChart() {
-      if (this.showChart) {
-        this.$nextTick(() => {
-          this.initChart();
-        });
-      } else if (this.chart) {
-        this.chart.dispose();
-        this.chart = null;
-      }
-    },
-
-    /**
-     * 重置地图视图
-     */
-    resetView() {
-      if (this.map) {
-        this.map.setView([24.5, 118], 8.4);
-      }
-    },
-  },
+const switchDataType = () => {
+  if (dataType.value === 'wind') {
+    // 切换到风场：隐藏浪图层，显示风图层
+    hideWaveLayers();
+    showWindLayers();
+  } else {
+    // 切换到浪场：隐藏风图层，显示浪图层
+    hideWindLayers();
+    showWaveLayers();
+  }
 };
+
+const hideWindLayers = () => {
+  if (!map.value) return;
+  if (tileScalarLayer.value) {
+    map.value.removeLayer(tileScalarLayer.value);
+    tileScalarLayer.value = null;
+  }
+  if (velocityLayer.value) {
+    try {
+      velocityLayer.value.onRemove(map.value);
+    } catch (e) {}
+    velocityLayer.value = null;
+  }
+  if (arrowLayer.value) {
+    map.value.removeLayer(arrowLayer.value);
+    arrowLayer.value = null;
+  }
+  if (barbLayer.value) {
+    map.value.removeLayer(barbLayer.value);
+    barbLayer.value = null;
+  }
+};
+
+const showWindLayers = () => {
+  if (showScalar.value && !tileScalarLayer.value) {
+    addScalarLayer();
+  }
+  if (showVector.value && !velocityLayer.value) {
+    addVectorLayer();
+  }
+  if (showArrow.value && !arrowLayer.value) {
+    addArrowLayer();
+  }
+  if (showBarb.value && !barbLayer.value) {
+    addBarbLayer();
+  }
+};
+
+const hideWaveLayers = () => {
+  if (!map.value) return;
+  if (waveLayer.value) {
+    map.value.removeLayer(waveLayer.value);
+    waveLayer.value = null;
+  }
+  if (waveScalarLayer.value) {
+    map.value.removeLayer(waveScalarLayer.value);
+    waveScalarLayer.value = null;
+  }
+};
+
+const showWaveLayers = () => {
+  if (showWaveScalar.value && !waveScalarLayer.value) {
+    addWaveScalarLayer();
+  }
+  if (showWave.value && !waveLayer.value) {
+    addWaveLayer();
+  }
+};
+
+// ==========================================
+// 播放轴事件处理
+// ==========================================
+
+async function loadWindData(dayIndex: number) {
+  // 如果已经加载过，直接使用缓存
+  if (windDataList.value[dayIndex]) {
+    currentWindData.value = windDataList.value[dayIndex];
+    updateWindLayers();
+    return;
+  }
+
+  dataLoading.value = true;
+  try {
+    const response = await fetch(WIND_DATA_FILES[dayIndex]);
+    const data = await response.json();
+    windDataList.value[dayIndex] = data;
+    currentWindData.value = data;
+    updateWindLayers();
+    console.log("加载风场数据成功: 第", dayIndex + 1, "天");
+  } catch (error) {
+    console.error("加载风场数据失败:", error);
+  } finally {
+    dataLoading.value = false;
+  }
+}
+
+const handleProgressChange = (progress: number) => {
+  // 计算当前是第几天 (0-4)
+  const dayIndex = Math.floor(progress / 24);
+  const cachedData = windDataList.value[dayIndex];
+
+  // 只有当天数变化时才更新风场数据
+  if (cachedData !== currentWindData.value) {
+    loadWindData(dayIndex);
+  }
+};
+
+const updateWindLayers = () => {
+  if (!currentWindData.value || !map.value) return;
+  // 只有当前是风场模式才更新风场图层
+  if (dataType.value !== 'wind') return;
+
+  // 更新或创建颜色图层
+  if (showScalar.value) {
+    if (tileScalarLayer.value) {
+      tileScalarLayer.value.setData(currentWindData.value);
+    } else {
+      addScalarLayer();
+    }
+  }
+  // 更新或创建粒子图层
+  if (showVector.value) {
+    if (velocityLayer.value) {
+      velocityLayer.value.setData(currentWindData.value);
+    } else {
+      addVectorLayer();
+    }
+  }
+  // 更新箭头图层
+  if (arrowLayer.value) {
+    arrowLayer.value.setData(currentWindData.value);
+  }
+  // 更新风杆图层
+  if (barbLayer.value) {
+    barbLayer.value.setData(currentWindData.value);
+  }
+};
+
+// ==========================================
+// 地图和图表相关方法
+// ==========================================
+
+const getTodayDate = () => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const initChart = () => {
+  chart.value = echarts.init(document.getElementById("chart") as HTMLElement);
+  const option = getProcessLineOption(chartData);
+  chart.value.setOption(option);
+  window.addEventListener("resize", handleResize);
+};
+
+const handleResize = () => {
+  chart.value && chart.value.resize();
+};
+
+const initMap = () => {
+  map.value = L.map("wind-map", {
+    maxZoom: 16,
+    zoomControl: false,
+    zoomAnimation: true,
+  });
+
+  // 图层在数据加载完成后由 updateWindLayers 初始化
+};
+
+const addScalarLayer = () => {
+  if (!map.value || !currentWindData.value) return;
+  const config = {
+    minValue: 0.01,
+    maxValue: scalarMaxValue.value,
+    overlayOpacity: scalarOpacity.value,
+  };
+  tileScalarLayer.value = L.scalarTileLayer(config);
+  tileScalarLayer.value.addTo(map.value);
+  tileScalarLayer.value.setData(currentWindData.value);
+};
+
+const updateScalarOpacity = () => {
+  if (tileScalarLayer.value) {
+    tileScalarLayer.value.setOverlayOpacity(scalarOpacity.value);
+  }
+};
+
+const updateScalarMaxValue = () => {
+  if (tileScalarLayer.value) {
+    tileScalarLayer.value.setMaxValue(scalarMaxValue.value);
+  }
+};
+
+const addVectorLayer = () => {
+  if (!map.value || !currentWindData.value) return;
+  const options = {
+    colorScale: [
+      "rgb(222,255,253)",
+      "rgb(234,234,234)",
+      "rgb(255,255,255)",
+      "rgb(156,156,156)",
+      "rgb(255,106,43)",
+    ],
+    opacity: 0.7,
+    maxVelocity: 35,
+    lineWidth: 1,
+    particleMultiplier: 1 / 500,
+    frameRate: 20,
+  };
+  velocityLayer.value = new L.velocityLayer({
+    displayValues: false,
+    displayOptions: {
+      velocityType: "",
+      displayPosition: "",
+      displayEmptyString: "",
+    },
+    ...options,
+  });
+  velocityLayer.value.setData(currentWindData.value);
+  velocityLayer.value.onAdd(map.value);
+};
+
+const addArrowLayer = () => {
+  if (!map.value || !currentWindData.value) return;
+  // 动态颜色回调 - 根据风速返回不同颜色
+  const getColor = arrowDynamicColor.value
+    ? (speed: number) => {
+        if (speed < 5) return "#00ff00";
+        if (speed < 10) return "#ffff00";
+        if (speed < 15) return "#ff9900";
+        if (speed < 20) return "#ff0000";
+        return "#ff00ff";
+      }
+    : null;
+
+  // 动态大小回调 - 根据风速返回不同大小
+  const getSize = arrowDynamicSize.value
+    ? (speed: number) => Math.min(35, 12 + speed * 1.2)
+    : null;
+
+  arrowLayer.value = L.vectorArrowLayer({
+    color: arrowDynamicColor.value ? "#ffffff" : "white",
+    arrowSize: 20,
+    gridSize: arrowGridSize.value,
+    getColor: getColor,
+    getSize: getSize,
+    alignToGrid: arrowAlignToGrid.value,
+  });
+  arrowLayer.value.addTo(map.value);
+  arrowLayer.value.setData(currentWindData.value);
+};
+
+const updateArrowLayer = () => {
+  if (!map.value) return;
+  if (arrowLayer.value) {
+    map.value.removeLayer(arrowLayer.value);
+    arrowLayer.value = null;
+  }
+  if (showArrow.value) {
+    addArrowLayer();
+  }
+};
+
+const addBarbLayer = () => {
+  if (!map.value || !currentWindData.value) return;
+  barbLayer.value = L.vectorBarbLayer({
+    color: "#333333",
+    barbSize: 30,
+    gridSize: 60,
+  });
+  barbLayer.value.addTo(map.value);
+  barbLayer.value.setData(currentWindData.value);
+};
+
+const toggleScalar = () => {
+  if (!map.value) return;
+  if (showScalar.value) {
+    addScalarLayer();
+  } else if (tileScalarLayer.value) {
+    map.value.removeLayer(tileScalarLayer.value);
+    tileScalarLayer.value = null;
+  }
+};
+
+const toggleVector = () => {
+  if (!map.value) return;
+  if (showVector.value) {
+    try {
+      addVectorLayer();
+    } catch (error) {
+      console.error("粒子图层加载失败，数据格式可能不兼容:", error);
+      showVector.value = false;
+      alert("粒子图层暂不支持当前数据格式");
+    }
+  } else if (velocityLayer.value) {
+    try {
+      velocityLayer.value.onRemove(map.value);
+      velocityLayer.value = null;
+    } catch (error) {
+      console.error("粒子图层移除失败:", error);
+    }
+  }
+};
+
+const toggleArrow = () => {
+  if (!map.value) return;
+  if (showArrow.value) {
+    addArrowLayer();
+  } else if (arrowLayer.value) {
+    map.value.removeLayer(arrowLayer.value);
+    arrowLayer.value = null;
+  }
+};
+
+const addWaveScalarLayer = () => {
+  if (!map.value) return;
+  const config = {
+    minValue: 0.01,
+    maxValue: 10,
+    overlayOpacity: waveScalarOpacity.value,
+  };
+  waveScalarLayer.value = L.scalarTileLayer(config);
+  waveScalarLayer.value.addTo(map.value);
+  waveScalarLayer.value.setData(waveData);
+};
+
+const toggleWaveScalar = () => {
+  if (!map.value) return;
+  if (showWaveScalar.value) {
+    addWaveScalarLayer();
+  } else if (waveScalarLayer.value) {
+    map.value.removeLayer(waveScalarLayer.value);
+    waveScalarLayer.value = null;
+  }
+};
+
+const updateWaveScalarOpacity = () => {
+  if (waveScalarLayer.value) {
+    waveScalarLayer.value.setOverlayOpacity(waveScalarOpacity.value);
+  }
+};
+
+const addWaveLayer = () => {
+  if (!map.value) return;
+  // 浪粒子图层（白色短横线沿浪向推进）
+  waveLayer.value = L.waveParticleLayer({
+    color: 'rgba(255, 255, 255, 0.9)',
+    lineWidth: 2,
+    lineLength: 6,
+    particleMultiplier: 1 / 500,
+    particleAge: 35,
+    frameRate: 20,
+    opacity: 0.8,
+    velocityScale: waveSpeed.value,
+  });
+  waveLayer.value.addTo(map.value);
+  waveLayer.value.setData(waveData);
+};
+
+const toggleWave = () => {
+  if (!map.value) return;
+  if (showWave.value) {
+    addWaveLayer();
+  } else if (waveLayer.value) {
+    map.value.removeLayer(waveLayer.value);
+    waveLayer.value = null;
+  }
+};
+
+const updateWaveLayer = () => {
+  if (!map.value) return;
+  if (waveLayer.value) {
+    map.value.removeLayer(waveLayer.value);
+    waveLayer.value = null;
+  }
+  if (showWave.value) {
+    addWaveLayer();
+  }
+};
+
+const toggleBarb = () => {
+  if (!map.value) return;
+  if (showBarb.value) {
+    addBarbLayer();
+  } else if (barbLayer.value) {
+    map.value.removeLayer(barbLayer.value);
+    barbLayer.value = null;
+  }
+};
+
+const toggleChart = () => {
+  if (!map.value) return;
+  if (showChart.value) {
+    nextTick(() => {
+      initChart();
+    });
+  } else if (chart.value) {
+    chart.value.dispose();
+    chart.value = null;
+  }
+};
+
+const resetView = () => {
+  if (map.value) {
+    map.value.setView([24.5, 118], 8.4);
+  }
+};
+
+onMounted(() => {
+  initMap();
+  // 加载第一天的风场数据
+  loadWindData(0);
+  // 图表默认关闭，不自动初始化
+});
+
+onUnmounted(() => {
+  if (map.value) {
+    map.value.remove();
+    map.value = null;
+  }
+  if (chart.value) {
+    chart.value.dispose();
+    chart.value = null;
+  }
+});
 </script>
 
 <style scoped>

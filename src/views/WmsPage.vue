@@ -58,89 +58,95 @@
   </div>
 </template>
 
-<script>
+<script setup lang="ts">
+import { ref } from 'vue'
 import L from "leaflet";
 import BaseMap from "@/components/BaseMap.vue";
 
-export default {
-  name: "WmsPage",
-  components: { BaseMap },
-  data() {
-    return {
-      map: null,
-      wmsLayer: null,
-      showWms: true,
-      opacity: 0.8,
-      currentStyle: "population",
-      currentBasemap: "osm",
-      wmsUrl: "http://localhost:8080/geoserver/wms",
-      layers: "ne:my_points",
-      layerBounds: [
-        [24, -130],
-        [50, -66],
-      ],
-      mapOptions: {
-        center: [37, -98],
-        zoom: 4,
-        maxZoom: 18,
-        minZoom: 2,
-      },
-    };
-  },
-  methods: {
-    onMapReady(map) {
-      this.map = map;
-      if (this.showWms) {
-        this.addWmsLayer();
-      }
-    },
-    addWmsLayer() {
-      if (this.wmsLayer) {
-        this.map.removeLayer(this.wmsLayer);
-      }
+const baseMap = ref<any>(null)
+const map = ref<L.Map | null>(null)
+const wmsLayer = ref<L.TileLayer.WMS | null>(null)
+const showWms = ref(true)
+const opacity = ref(0.8)
+const currentStyle = ref("population")
+const currentBasemap = ref("osm")
+const wmsUrl = ref("http://localhost:8080/geoserver/wms")
+const layers = ref("ne:my_points")
+const layerBounds = ref<[number, number][]>([
+  [24, -130],
+  [50, -66],
+])
+const mapOptions = ref({
+  center: [37, -98],
+  zoom: 4,
+  maxZoom: 18,
+  minZoom: 2,
+})
 
-      this.wmsLayer = L.tileLayer.wms(this.wmsUrl, {
-        layers: this.layers,
-        styles: this.currentStyle,
-        format: "image/png",
-        transparent: true,
-        version: "1.1.1",
-        opacity: this.opacity,
-        attribution: "GeoServer Demo",
-      });
+const onMapReady = (mapInstance: L.Map) => {
+  map.value = mapInstance;
+  if (showWms.value) {
+    addWmsLayer();
+  }
+};
 
-      this.wmsLayer.addTo(this.map);
-    },
-    toggleWms() {
-      if (this.showWms) {
-        this.addWmsLayer();
-      } else if (this.wmsLayer) {
-        this.map.removeLayer(this.wmsLayer);
-        this.wmsLayer = null;
-      }
-    },
-    updateOpacity() {
-      if (this.wmsLayer) {
-        this.wmsLayer.setOpacity(this.opacity);
-      }
-    },
-    changeStyle() {
-      if (this.wmsLayer) {
-        this.addWmsLayer();
-      }
-    },
-    changeBasemap() {
-      this.$refs.baseMap.setBasemap(this.currentBasemap);
-    },
-    zoomToLayer() {
-      this.map.fitBounds(this.layerBounds);
-    },
-    refreshLayer() {
-      if (this.wmsLayer) {
-        this.addWmsLayer();
-      }
-    },
-  },
+const addWmsLayer = () => {
+  if (!map.value) return;
+
+  if (wmsLayer.value) {
+    map.value.removeLayer(wmsLayer.value);
+  }
+
+  wmsLayer.value = L.tileLayer.wms(wmsUrl.value, {
+    layers: layers.value,
+    styles: currentStyle.value,
+    format: "image/png",
+    transparent: true,
+    version: "1.1.1",
+    opacity: opacity.value,
+    attribution: "GeoServer Demo",
+  });
+
+  wmsLayer.value.addTo(map.value);
+};
+
+const toggleWms = () => {
+  if (showWms.value) {
+    addWmsLayer();
+  } else if (wmsLayer.value && map.value) {
+    map.value.removeLayer(wmsLayer.value);
+    wmsLayer.value = null;
+  }
+};
+
+const updateOpacity = () => {
+  if (wmsLayer.value) {
+    wmsLayer.value.setOpacity(opacity.value);
+  }
+};
+
+const changeStyle = () => {
+  if (wmsLayer.value) {
+    addWmsLayer();
+  }
+};
+
+const changeBasemap = () => {
+  if (baseMap.value) {
+    baseMap.value.setBasemap(currentBasemap.value);
+  }
+};
+
+const zoomToLayer = () => {
+  if (map.value) {
+    map.value.fitBounds(layerBounds.value);
+  }
+};
+
+const refreshLayer = () => {
+  if (wmsLayer.value) {
+    addWmsLayer();
+  }
 };
 </script>
 

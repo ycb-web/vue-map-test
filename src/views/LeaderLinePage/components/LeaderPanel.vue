@@ -51,171 +51,161 @@
   </div>
 </template>
 
-<script>
+<script setup lang="ts">
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { getLineStartPoint } from "../utils/collision";
 
-export default {
-  name: "LeaderPanel",
-  props: {
-    panel: {
-      type: Object,
-      required: true,
-    },
-    map: {
-      type: Object,
-      required: true,
-    },
-    showLine: {
-      type: Boolean,
-      default: true,
-    },
-  },
-  data() {
-    return {
-      isDragging: false,
-      dragOffset: { x: 0, y: 0 },
-      currentPosition: { x: 0, y: 0 },
-      currentAnchor: { x: 0, y: 0 },
-    };
-  },
-  computed: {
-    panelStyle() {
-      return {
-        left: `${this.currentPosition.x}px`,
-        top: `${this.currentPosition.y}px`,
-        width: this.panel.size ? `${this.panel.size.width}px` : "auto",
-      };
-    },
-    anchor() {
-      return this.currentAnchor;
-    },
-    lineStart() {
-      if (!this.$refs.panelContent) {
-        return { x: this.currentPosition.x, y: this.currentPosition.y };
+const props = defineProps<{
+  panel: {
+    type: Object,
+    required: true
+  }
+  map: {
+    type: Object,
+    required: true
+  }
+  showLine?: boolean
+}>()
+
+const emit = defineEmits<{
+  (e: 'dragEnd', panelId: string, position: { x: number; y: number }): void
+  (e: 'positionUpdate', panelId: string, position: { x: number; y: number }, size?: { width: number; height: number }): void
+}>()
+
+const isDragging = ref(false)
+const dragOffset = ref({ x: 0, y: 0 })
+const currentPosition = ref({ x: 0, y: 0 })
+const currentAnchor = ref({ x: 0, y: 0 })
+const panelContent = ref<HTMLElement | null>(null)
+
+const panelStyle = computed(() => {
+  return {
+    left: `${currentPosition.value.x}px`,
+    top: `${currentPosition.value.y}px`,
+    width: props.panel.size ? `${props.panel.size.width}px` : "auto",
+  };
+})
+
+const anchor = computed(() => currentAnchor.value)
+
+const lineStart = computed(() => {
+  if (!panelContent.value) {
+    return { x: currentPosition.value.x, y: currentPosition.value.y }
+  }
+  const rect = {
+    x: currentPosition.value.x,
+    y: currentPosition.value.y,
+    width: panelContent.value.offsetWidth || 180,
+    height: panelContent.value.offsetHeight || 100,
+  }
+  return getLineStartPoint(rect, currentAnchor.value)
+})
+
+watch(() => props.panel.position, (newPos) => {
+  if (newPos) {
+    currentPosition.value = { ...newPos }
+    nextTick(() => emitPositionUpdate())
+  }
+}, { immediate: true, deep: true })
+
+watch(() => props.panel.anchor, (newAnchor) => {
+  if (newAnchor) {
+    currentAnchor.value = { ...newAnchor }
+  }
+}, { immediate: true, deep: true })
+
+// 绑定地图事件
+const bindMapEvents = () => {
+  if (props.map) {
+    props.map.on("move", updateAnchorPosition)
+    props.map.on("zoom", updateAnchorPosition)
+  }
+}
+
+// 解绑地图事件
+const unbindMapEvents = () => {
+  if (props.map) {
+    props.map.off("move", updateAnchorPosition)
+    props.map.off("zoom", updateAnchorPosition)
+  }
+}
+
+// 更新锚点位置（地图移动/缩放时）
+const updateAnchorPosition = () => {
+  if (props.panel.lat && props.panel.lng && props.map) {
+    const point = props.map.latLngToContainerPoint([
+      props.panel.lat,
+      props.panel.lng,
+    ])
+    currentAnchor.value = { x: point.x, y: point.y }
+  }
+}
+
+// 鼠标按下开始拖拽
+const onMouseDown = (e: MouseEvent) => {
+  if (e.button !== 0) return // 只响应左键
+  e.preventDefault()
+  e.stopPropagation()
+
+  isDragging.value = true
+  dragOffset.value = {
+    x: e.clientX - currentPosition.value.x,
+    y: e.clientY - currentPosition.value.y,
+  }
+
+  document.addEventListener("mousemove", onMouseMove)
+  document.addEventListener("mouseup", onMouseUp)
+}
+
+// 鼠标移动
+const onMouseMove = (e: MouseEvent) => {
+  if (!isDragging.value) return
+
+  currentPosition.value = {
+    x: e.clientX - dragOffset.value.x,
+    y: e.clientY - dragOffset.value.y,
+  }
+
+  // 通知父组件位置更新（用于引线跟随）
+  emitPositionUpdate()
+}
+
+// 鼠标释放结束拖拽
+const onMouseUp = () => {
+  if (!isDragging.value) return
+
+  isDragging.value = false
+  unbindDragEvents()
+  emit('dragEnd', props.panel.id, { ...currentPosition.value })
+}
+
+// 发送位置更新事件
+const emitPositionUpdate = () => {
+  const size = panelContent.value
+    ? {
+        width: panelContent.value.offsetWidth,
+        height: panelContent.value.offsetHeight,
       }
-      const rect = {
-        x: this.currentPosition.x,
-        y: this.currentPosition.y,
-        width: this.$refs.panelContent.offsetWidth || 180,
-        height: this.$refs.panelContent.offsetHeight || 100,
-      };
-      return getLineStartPoint(rect, this.currentAnchor);
-    },
-  },
-  watch: {
-    "panel.position": {
-      handler(newPos) {
-        if (newPos) {
-          this.currentPosition = { ...newPos };
-          this.$nextTick(() => this.emitPositionUpdate());
-        }
-      },
-      immediate: true,
-      deep: true,
-    },
-    "panel.anchor": {
-      handler(newAnchor) {
-        if (newAnchor) {
-          this.currentAnchor = { ...newAnchor };
-        }
-      },
-      immediate: true,
-      deep: true,
-    },
-  },
-  mounted() {
-    this.bindMapEvents();
-    // 初始化时发送位置信息
-    this.$nextTick(() => this.emitPositionUpdate());
-  },
-  beforeDestroy() {
-    this.unbindMapEvents();
-    this.unbindDragEvents();
-  },
-  methods: {
-    // 绑定地图事件
-    bindMapEvents() {
-      if (this.map) {
-        this.map.on("move", this.updateAnchorPosition);
-        this.map.on("zoom", this.updateAnchorPosition);
-      }
-    },
+    : null
+  emit('positionUpdate', props.panel.id, { ...currentPosition.value }, size)
+}
 
-    // 解绑地图事件
-    unbindMapEvents() {
-      if (this.map) {
-        this.map.off("move", this.updateAnchorPosition);
-        this.map.off("zoom", this.updateAnchorPosition);
-      }
-    },
+// 解绑拖拽事件
+const unbindDragEvents = () => {
+  document.removeEventListener("mousemove", onMouseMove)
+  document.removeEventListener("mouseup", onMouseUp)
+}
 
-    // 更新锚点位置（地图移动/缩放时）
-    updateAnchorPosition() {
-      if (this.panel.lat && this.panel.lng) {
-        const point = this.map.latLngToContainerPoint([
-          this.panel.lat,
-          this.panel.lng,
-        ]);
-        this.currentAnchor = { x: point.x, y: point.y };
-      }
-    },
+onMounted(() => {
+  bindMapEvents()
+  // 初始化时发送位置信息
+  nextTick(() => emitPositionUpdate())
+})
 
-    // 鼠标按下开始拖拽
-    onMouseDown(e) {
-      if (e.button !== 0) return; // 只响应左键
-      e.preventDefault();
-      e.stopPropagation();
-
-      this.isDragging = true;
-      this.dragOffset = {
-        x: e.clientX - this.currentPosition.x,
-        y: e.clientY - this.currentPosition.y,
-      };
-
-      document.addEventListener("mousemove", this.onMouseMove);
-      document.addEventListener("mouseup", this.onMouseUp);
-    },
-
-    // 鼠标移动
-    onMouseMove(e) {
-      if (!this.isDragging) return;
-
-      this.currentPosition = {
-        x: e.clientX - this.dragOffset.x,
-        y: e.clientY - this.dragOffset.y,
-      };
-      
-      // 通知父组件位置更新（用于引线跟随）
-      this.emitPositionUpdate();
-    },
-
-    // 鼠标释放结束拖拽
-    onMouseUp() {
-      if (!this.isDragging) return;
-
-      this.isDragging = false;
-      this.unbindDragEvents();
-      this.$emit("dragEnd", this.panel.id, { ...this.currentPosition });
-    },
-
-    // 发送位置更新事件
-    emitPositionUpdate() {
-      const size = this.$refs.panelContent
-        ? {
-            width: this.$refs.panelContent.offsetWidth,
-            height: this.$refs.panelContent.offsetHeight,
-          }
-        : null;
-      this.$emit("positionUpdate", this.panel.id, { ...this.currentPosition }, size);
-    },
-
-    // 解绑拖拽事件
-    unbindDragEvents() {
-      document.removeEventListener("mousemove", this.onMouseMove);
-      document.removeEventListener("mouseup", this.onMouseUp);
-    },
-  },
-};
+onUnmounted(() => {
+  unbindMapEvents()
+  unbindDragEvents()
+})
 </script>
 
 <style scoped>

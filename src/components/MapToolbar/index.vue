@@ -92,9 +92,9 @@
     <a-popover
       trigger="click"
       placement="bottom"
-      v-model="basemapPopoverVisible"
+      v-model:visible="basemapPopoverVisible"
     >
-      <template slot="content">
+      <template #content>
         <div class="basemap-list">
           <!-- 遍历底图列表，显示缩略图或占位符 -->
           <div
@@ -125,8 +125,8 @@
     </a-popover>
 
     <!-- 工具箱按钮：点击弹出测量工具选择面板 -->
-    <a-popover trigger="click" placement="bottom" v-model="toolsPopoverVisible">
-      <template slot="content">
+    <a-popover trigger="click" placement="bottom" v-model:visible="toolsPopoverVisible">
+      <template #content>
         <div class="tools-list">
           <div
             class="tools-item"
@@ -199,344 +199,319 @@
   </div>
 </template>
 
-<script>
+<script setup lang="ts">
+import { ref, watch, onMounted, onUnmounted } from 'vue'
 import L from "leaflet";
 import DrawPlug from "@/utils/DrawPlug";
 
-export default {
-  name: "MapToolbar",
-
-  props: {
-    /**
-     * Leaflet 地图实例
-     * 由父组件传入，用于控制地图操作
-     */
-    map: {
-      type: Object,
-      default: null,
-    },
-
-    /**
-     * 初始中心点坐标 [纬度, 经度]
-     * 点击复位按钮时地图会回到这个位置
-     */
-    initialCenter: {
-      type: Array,
-      default: function () {
-        return [24.5, 118];
+const props = withDefaults(defineProps<{
+  /**
+   * Leaflet 地图实例
+   * 由父组件传入，用于控制地图操作
+   */
+  map?: any
+  /**
+   * 初始中心点坐标 [纬度, 经度]
+   * 点击复位按钮时地图会回到这个位置
+   */
+  initialCenter?: [number, number]
+  /**
+   * 初始缩放层级
+   * 点击复位按钮时地图会回到这个层级
+   */
+  initialZoom?: number
+  /**
+   * 底图列表配置
+   */
+  basemaps?: any[]
+}>(), {
+  map: null,
+  initialCenter: () => [24.5, 118],
+  initialZoom: 8,
+  basemaps: () => {
+    const tk = "93724b915d1898d946ca7dc7b765dda5";
+    return [
+      {
+        name: "电子地图",
+        initSelect: true, // 默认选中
+        baseUrl: `https://t0.tianditu.gov.cn/vec_w/wmts?tk=${tk}&SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=vec&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TileMatrix={z}&TileCol={x}&TileRow={y}`,
+        labelUrl: `https://t0.tianditu.gov.cn/cva_w/wmts?tk=${tk}&SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=cva&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TileMatrix={z}&TileCol={x}&TileRow={y}`,
       },
-    },
-
-    /**
-     * 初始缩放层级
-     * 点击复位按钮时地图会回到这个层级
-     */
-    initialZoom: {
-      type: Number,
-      default: 8,
-    },
-
-    /**
-     * 底图列表配置
-     * 每个底图对象包含：
-     * - name: 底图名称（必填）
-     * - baseUrl: 底图瓦片地址（必填）
-     * - labelUrl: 标注图层瓦片地址（可选）
-     * - thumbnail: 缩略图地址（可选）
-     * - initSelect: 是否默认选中（可选，只有一个为 true）
-     */
-    basemaps: {
-      type: Array,
-      default: function () {
-        const tk = "93724b915d1898d946ca7dc7b765dda5";
-        return [
-          {
-            name: "电子地图",
-            initSelect: true, // 默认选中
-            baseUrl: `https://t0.tianditu.gov.cn/vec_w/wmts?tk=${tk}&SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=vec&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TileMatrix={z}&TileCol={x}&TileRow={y}`,
-            labelUrl: `https://t0.tianditu.gov.cn/cva_w/wmts?tk=${tk}&SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=cva&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TileMatrix={z}&TileCol={x}&TileRow={y}`,
-          },
-          {
-            name: "地形图",
-            baseUrl: `https://t0.tianditu.gov.cn/ter_w/wmts?tk=${tk}&SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=ter&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TileMatrix={z}&TileCol={x}&TileRow={y}`,
-            labelUrl: `https://t0.tianditu.gov.cn/cta_w/wmts?tk=${tk}&SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=cta&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TileMatrix={z}&TileCol={x}&TileRow={y}`,
-          },
-          {
-            name: "遥感地图",
-            baseUrl: `https://t0.tianditu.gov.cn/img_w/wmts?tk=${tk}&SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=img&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TileMatrix={z}&TileCol={x}&TileRow={y}`,
-            labelUrl: `https://t0.tianditu.gov.cn/cia_w/wmts?tk=${tk}&SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=cia&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TileMatrix={z}&TileCol={x}&TileRow={y}`,
-          },
-        ];
+      {
+        name: "地形图",
+        baseUrl: `https://t0.tianditu.gov.cn/ter_w/wmts?tk=${tk}&SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=ter&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TileMatrix={z}&TileCol={x}&TileRow={y}`,
+        labelUrl: `https://t0.tianditu.gov.cn/cta_w/wmts?tk=${tk}&SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=cta&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TileMatrix={z}&TileCol={x}&TileRow={y}`,
       },
-    },
-  },
-
-  data() {
-    return {
-      // 当前是否处于全屏状态
-      isFullscreen: false,
-      // 当前选中的底图索引
-      currentBasemapIndex: 0,
-      // 当前底图图层实例
-      baseLayer: null,
-      // 当前标注图层实例
-      labelLayer: null,
-      // 是否已初始化底图（防止重复初始化）
-      hasInitialized: false,
-      // 底图选择弹窗是否可见
-      basemapPopoverVisible: false,
-      // 工具箱弹窗是否可见
-      toolsPopoverVisible: false,
-      // 当前激活的测量工具：'distance' | 'area' | null
-      currentTool: null,
-      // 测量图层组
-      measureGroup: null,
-      // 测量工具实例
-      drawPlug: null,
-    };
-  },
-
-  mounted() {
-    // 监听全屏状态变化事件
-    document.addEventListener("fullscreenchange", this.onFullscreenChange);
-    document.addEventListener(
-      "webkitfullscreenchange",
-      this.onFullscreenChange
-    );
-  },
-
-  watch: {
-    /**
-     * 监听 map 属性变化
-     * 当地图实例传入且未初始化时，自动加载默认底图
-     */
-    map: {
-      handler(newMap) {
-        if (newMap && !this.hasInitialized) {
-          this.initBasemap();
-        }
+      {
+        name: "遥感地图",
+        baseUrl: `https://t0.tianditu.gov.cn/img_w/wmts?tk=${tk}&SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=img&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TileMatrix={z}&TileCol={x}&TileRow={y}`,
+        labelUrl: `https://t0.tianditu.gov.cn/cia_w/wmts?tk=${tk}&SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=cia&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TileMatrix={z}&TileCol={x}&TileRow={y}`,
       },
-      immediate: true,
-    },
+    ];
   },
+})
 
-  beforeDestroy() {
-    // 移除全屏状态监听
-    document.removeEventListener("fullscreenchange", this.onFullscreenChange);
-    document.removeEventListener(
-      "webkitfullscreenchange",
-      this.onFullscreenChange
-    );
-  },
+const emit = defineEmits<{
+  (e: 'reset'): void
+  (e: 'fullscreen'): void
+  (e: 'zoom-in'): void
+  (e: 'zoom-out'): void
+  (e: 'layers'): void
+  (e: 'tools'): void
+  (e: 'basemap-change', data: { index: number; basemap: any }): void
+}>()
 
-  methods: {
-    /**
-     * 全屏状态变化回调
-     * 更新 isFullscreen 状态以切换按钮图标
-     */
-    onFullscreenChange() {
-      this.isFullscreen =
-        !!document.fullscreenElement || !!document.webkitFullscreenElement;
-    },
+// 当前是否处于全屏状态
+const isFullscreen = ref(false)
+// 当前选中的底图索引
+const currentBasemapIndex = ref(0)
+// 当前底图图层实例
+const baseLayer = ref<L.TileLayer | null>(null)
+// 当前标注图层实例
+const labelLayer = ref<L.TileLayer | null>(null)
+// 是否已初始化底图（防止重复初始化）
+const hasInitialized = ref(false)
+// 底图选择弹窗是否可见
+const basemapPopoverVisible = ref(false)
+// 工具箱弹窗是否可见
+const toolsPopoverVisible = ref(false)
+// 当前激活的测量工具：'distance' | 'area' | null
+const currentTool = ref<string | null>(null)
+// 测量图层组
+const measureGroup = ref<L.LayerGroup | null>(null)
+// 测量工具实例
+const drawPlug = ref<DrawPlug | null>(null)
 
-    /**
-     * 初始化底图
-     * 根据 initSelect 属性找到默认底图并加载
-     * 如果没有设置 initSelect，则使用第一个底图
-     * 同时设置地图初始视图
-     */
-    initBasemap() {
-      if (!this.map || this.hasInitialized) return;
+/**
+ * 全屏状态变化回调
+ * 更新 isFullscreen 状态以切换按钮图标
+ */
+const onFullscreenChange = () => {
+  isFullscreen.value =
+    !!document.fullscreenElement || !!document.webkitFullscreenElement;
+}
 
-      // 设置初始视图
-      this.map.setView(this.initialCenter, this.initialZoom);
+/**
+ * 初始化底图
+ * 根据 initSelect 属性找到默认底图并加载
+ * 如果没有设置 initSelect，则使用第一个底图
+ * 同时设置地图初始视图
+ */
+const initBasemap = () => {
+  if (!props.map || hasInitialized.value) return;
 
-      // 找到 initSelect: true 的底图索引，没有则用第一个
-      var defaultIndex = this.basemaps.findIndex(function (item) {
-        return item.initSelect;
-      });
-      if (defaultIndex === -1) defaultIndex = 0;
+  // 设置初始视图
+  props.map.setView(props.initialCenter, props.initialZoom);
 
-      var basemap = this.basemaps[defaultIndex];
-      if (!basemap) return;
+  // 找到 initSelect: true 的底图索引，没有则用第一个
+  const defaultIndex = props.basemaps.findIndex((item) => item.initSelect);
+  const idx = defaultIndex === -1 ? 0 : defaultIndex;
 
-      // 添加底图瓦片图层
-      this.baseLayer = L.tileLayer(basemap.baseUrl, {
-        maxZoom: 18,
-        detectRetina: true,
-      });
-      this.baseLayer.addTo(this.map);
-      this.baseLayer.setZIndex(0);
+  const basemap = props.basemaps[idx];
+  if (!basemap) return;
 
-      // 添加标注图层（如果有）
-      if (basemap.labelUrl) {
-        this.labelLayer = L.tileLayer(basemap.labelUrl, {
-          transparent: true,
-          maxZoom: 18,
-        });
-        this.labelLayer.addTo(this.map);
-        this.labelLayer.setZIndex(1);
-      }
+  // 添加底图瓦片图层
+  baseLayer.value = L.tileLayer(basemap.baseUrl, {
+    maxZoom: 18,
+    detectRetina: true,
+  });
+  baseLayer.value.addTo(props.map);
+  baseLayer.value.setZIndex(0);
 
-      this.currentBasemapIndex = defaultIndex;
-      this.hasInitialized = true;
+  // 添加标注图层（如果有）
+  if (basemap.labelUrl) {
+    labelLayer.value = L.tileLayer(basemap.labelUrl, {
+      transparent: true,
+      maxZoom: 18,
+    });
+    labelLayer.value.addTo(props.map);
+    labelLayer.value.setZIndex(1);
+  }
 
-      // 禁用双击缩放（避免与测量双击结束冲突）
-      this.map.doubleClickZoom.disable();
+  currentBasemapIndex.value = idx;
+  hasInitialized.value = true;
 
-      // 初始化测量图层组和工具
-      this.measureGroup = L.layerGroup().addTo(this.map);
-      this.drawPlug = new DrawPlug(this.map, this.measureGroup);
-    },
+  // 禁用双击缩放（避免与测量双击结束冲突）
+  props.map.doubleClickZoom.disable();
 
-    /**
-     * 复位按钮点击处理
-     * 将地图视图重置到初始中心点和层级
-     */
-    handleLocate() {
-      this.$emit("reset");
-      if (this.map) {
-        this.map.setView(this.initialCenter, this.initialZoom);
-      }
-    },
-
-    /**
-     * 全屏按钮点击处理
-     * 切换浏览器全屏状态
-     */
-    handleFullscreen() {
-      this.$emit("fullscreen");
-      var el = document.documentElement;
-      if (!document.fullscreenElement) {
-        // 进入全屏
-        if (el.requestFullscreen) {
-          el.requestFullscreen();
-        } else if (el.webkitRequestFullscreen) {
-          el.webkitRequestFullscreen();
-        }
-      } else {
-        // 退出全屏
-        if (document.exitFullscreen) {
-          document.exitFullscreen();
-        } else if (document.webkitExitFullscreen) {
-          document.webkitExitFullscreen();
-        }
-      }
-    },
-
-    /**
-     * 放大按钮点击处理
-     */
-    handleZoomIn() {
-      this.$emit("zoom-in");
-      if (this.map) {
-        this.map.zoomIn();
-      }
-    },
-
-    /**
-     * 缩小按钮点击处理
-     */
-    handleZoomOut() {
-      this.$emit("zoom-out");
-      if (this.map) {
-        this.map.zoomOut();
-      }
-    },
-
-    /**
-     * 图层按钮点击处理（预留）
-     */
-    handleLayers() {
-      this.$emit("layers");
-    },
-
-    /**
-     * 工具箱按钮点击处理
-     */
-    handleTools() {
-      this.$emit("tools");
-    },
-
-    /**
-     * 切换底图
-     * @param {number} index - 要切换到的底图索引
-     */
-    switchBasemap(index) {
-      // 如果点击的是当前底图，不做处理
-      if (!this.map || index === this.currentBasemapIndex) return;
-
-      var basemap = this.basemaps[index];
-      if (!basemap) return;
-
-      // 移除旧的底图图层
-      if (this.baseLayer) {
-        this.map.removeLayer(this.baseLayer);
-      }
-      // 移除旧的标注图层
-      if (this.labelLayer) {
-        this.map.removeLayer(this.labelLayer);
-      }
-
-      // 添加新的底图图层
-      this.baseLayer = L.tileLayer(basemap.baseUrl, {
-        maxZoom: 18,
-        detectRetina: true,
-      });
-      this.baseLayer.addTo(this.map);
-      this.baseLayer.setZIndex(0);
-
-      // 添加新的标注图层（如果有）
-      if (basemap.labelUrl) {
-        this.labelLayer = L.tileLayer(basemap.labelUrl, {
-          transparent: true,
-          maxZoom: 18,
-        });
-        this.labelLayer.addTo(this.map);
-        this.labelLayer.setZIndex(1);
-      }
-
-      // 更新当前底图索引
-      this.currentBasemapIndex = index;
-      // 关闭弹窗
-      this.basemapPopoverVisible = false;
-      // 触发事件通知父组件
-      this.$emit("basemap-change", { index: index, basemap: basemap });
-    },
-
-    /**
-     * 开始测距
-     */
-    startMeasureDistance() {
-      this.toolsPopoverVisible = false;
-      this.currentTool = "distance";
-      if (this.drawPlug) {
-        this.drawPlug.startDrawLine();
-      }
-    },
-
-    /**
-     * 开始测面
-     */
-    startMeasureArea() {
-      this.toolsPopoverVisible = false;
-      this.currentTool = "area";
-      if (this.drawPlug) {
-        this.drawPlug.startDrawPolygon();
-      }
-    },
-
-    /**
-     * 清除测量结果
-     */
-    clearMeasure() {
-      this.currentTool = null;
-      if (this.drawPlug) {
-        this.drawPlug.clearLayer();
-      }
-    },
-  },
+  // 初始化测量图层组和工具
+  measureGroup.value = L.layerGroup().addTo(props.map);
+  drawPlug.value = new DrawPlug(props.map, measureGroup.value);
 };
+
+/**
+ * 复位按钮点击处理
+ * 将地图视图重置到初始中心点和层级
+ */
+const handleLocate = () => {
+  emit('reset');
+  if (props.map) {
+    props.map.setView(props.initialCenter, props.initialZoom);
+  }
+};
+
+/**
+ * 全屏按钮点击处理
+ * 切换浏览器全屏状态
+ */
+const handleFullscreen = () => {
+  emit('fullscreen');
+  const el = document.documentElement;
+  if (!document.fullscreenElement) {
+    // 进入全屏
+    if (el.requestFullscreen) {
+      el.requestFullscreen();
+    } else if (el.webkitRequestFullscreen) {
+      el.webkitRequestFullscreen();
+    }
+  } else {
+    // 退出全屏
+    if (document.exitFullscreen) {
+      document.exitFullscreen();
+    } else if (document.webkitExitFullscreen) {
+      document.webkitExitFullscreen();
+    }
+  }
+};
+
+/**
+ * 放大按钮点击处理
+ */
+const handleZoomIn = () => {
+  emit('zoom-in');
+  if (props.map) {
+    props.map.zoomIn();
+  }
+};
+
+/**
+ * 缩小按钮点击处理
+ */
+const handleZoomOut = () => {
+  emit('zoom-out');
+  if (props.map) {
+    props.map.zoomOut();
+  }
+};
+
+/**
+ * 图层按钮点击处理（预留）
+ */
+const handleLayers = () => {
+  emit('layers');
+};
+
+/**
+ * 工具箱按钮点击处理
+ */
+const handleTools = () => {
+  emit('tools');
+};
+
+/**
+ * 切换底图
+ */
+const switchBasemap = (index: number) => {
+  // 如果点击的是当前底图，不做处理
+  if (!props.map || index === currentBasemapIndex.value) return;
+
+  const basemap = props.basemaps[index];
+  if (!basemap) return;
+
+  // 移除旧的底图图层
+  if (baseLayer.value) {
+    props.map.removeLayer(baseLayer.value);
+  }
+  // 移除旧的标注图层
+  if (labelLayer.value) {
+    props.map.removeLayer(labelLayer.value);
+  }
+
+  // 添加新的底图图层
+  baseLayer.value = L.tileLayer(basemap.baseUrl, {
+    maxZoom: 18,
+    detectRetina: true,
+  });
+  baseLayer.value.addTo(props.map);
+  baseLayer.value.setZIndex(0);
+
+  // 添加新的标注图层（如果有）
+  if (basemap.labelUrl) {
+    labelLayer.value = L.tileLayer(basemap.labelUrl, {
+      transparent: true,
+      maxZoom: 18,
+    });
+    labelLayer.value.addTo(props.map);
+    labelLayer.value.setZIndex(1);
+  }
+
+  // 更新当前底图索引
+  currentBasemapIndex.value = index;
+  // 关闭弹窗
+  basemapPopoverVisible.value = false;
+  // 触发事件通知父组件
+  emit('basemap-change', { index, basemap });
+};
+
+/**
+ * 开始测距
+ */
+const startMeasureDistance = () => {
+  toolsPopoverVisible.value = false;
+  currentTool.value = "distance";
+  if (drawPlug.value) {
+    drawPlug.value.startDrawLine();
+  }
+};
+
+/**
+ * 开始测面
+ */
+const startMeasureArea = () => {
+  toolsPopoverVisible.value = false;
+  currentTool.value = "area";
+  if (drawPlug.value) {
+    drawPlug.value.startDrawPolygon();
+  }
+};
+
+/**
+ * 清除测量结果
+ */
+const clearMeasure = () => {
+  currentTool.value = null;
+  if (drawPlug.value) {
+    drawPlug.value.clearLayer();
+  }
+};
+
+/**
+ * 监听 map 属性变化
+ * 当地图实例传入且未初始化时，自动加载默认底图
+ */
+watch(() => props.map, (newMap) => {
+  if (newMap && !hasInitialized.value) {
+    initBasemap();
+  }
+}, { immediate: true });
+
+onMounted(() => {
+  // 监听全屏状态变化事件
+  document.addEventListener("fullscreenchange", onFullscreenChange);
+  document.addEventListener(
+    "webkitfullscreenchange",
+    onFullscreenChange
+  );
+});
+
+onUnmounted(() => {
+  // 移除全屏状态监听
+  document.removeEventListener("fullscreenchange", onFullscreenChange);
+  document.removeEventListener(
+    "webkitfullscreenchange",
+    onFullscreenChange
+  );
+});
 </script>
 
 <style scoped>
