@@ -7,7 +7,10 @@
     "dev": "vite",
     "build": "vite build",
     "type-check": "vue-tsc --noEmit",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "lib": "node scripts/build-lib.js",
+    "lib:wind": "vite build --config vite.lib.config.ts --filter wind",
+    "lib:all": "node scripts/build-lib.js all"
   },
   "dependencies": {
     "@geoman-io/leaflet-geoman-free": "^2.19.2",

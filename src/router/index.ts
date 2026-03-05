@@ -7,6 +7,7 @@ import ContourPage from '../views/ContourPage.vue'
 import EditPage from '../views/EditPage.vue'
 import PlaygroundPage from '../views/PlaygroundPage/index.vue'
 import LeaderLinePage from '../views/LeaderLinePage/index.vue'
+import UmdTestPage from '../views/UmdTestPage/index.vue'
 
 // 扩展 RouteMeta 接口
 declare module 'vue-router' {
@@ -91,6 +92,15 @@ const routes = [
     meta: {
       title: '引导线 - Vue地图可视化工具',
       description: '引导线可视化组件，支持地图标注引导'
+    },
+  },
+  {
+    path: '/umd-test',
+    name: 'UmdTest',
+    component: UmdTestPage,
+    meta: {
+      title: 'UMD 测试 - Vue地图可视化工具',
+      description: '测试打包后的 UMD 模块是否可以正常使用'
     },
   },
 ]
