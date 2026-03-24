@@ -1,18 +1,18 @@
 <template>
   <div class="pane">
     <div class="tab-meta">
-      <div class="tab-title">浪 fort.14 模块</div>
+      <div class="tab-title">新水深fort14</div>
       <div class="tab-desc">
-        这份新加入的 `fort.14` 先按“节点标量值 + 三角网格拓扑”方式接入。
-        数据链路同样是 `fort.14 -> mesh.json`，页面里用 Canvas + GridLayer 渲染，并保留点击查询节点插值结果的能力。
+        数据来源是 `fort.14 -> mesh.json`。页面直接在 Vue 组件里做 Canvas + GridLayer
+        渲染，并保留点击查询网格深度的能力。
       </div>
     </div>
 
     <div class="memory-card">
-      <div class="memory-title">这份 fort.14 的结构</div>
+      <div class="memory-title">这份 fort.14 是什么数据</div>
       <div class="memory-desc">
-        它和水深 fort.14 一样，都是 ADCIRC 的三角网格格式。
-        每个节点记录 <b>经度</b>、<b>纬度</b> 和一个 <b>节点标量值</b>，三角形单元负责描述网格连接关系。
+        它是 ADCIRC 的二维水深地形网格数据。
+        每个节点记录 <b>经度</b>、<b>纬度</b> 和 <b>深度</b>，三角形单元只负责描述网格拓扑连接关系。
       </div>
       <div class="memory-grid">
         <div class="memory-item">
@@ -32,10 +32,10 @@
         </div>
       </div>
       <div class="memory-list">
-        <div class="memory-list-title">当前接入方式</div>
-        <div class="memory-list-line">`nodes`: 扁平数组，每 3 个值为一组，顺序是 `lon, lat, value`。</div>
+        <div class="memory-list-title">如何理解字段</div>
+        <div class="memory-list-line">`nodes`: 扁平数组，每 3 个值为一组，顺序是 `lon, lat, depth`。</div>
         <div class="memory-list-line">`elements`: 扁平数组，每 3 个值为一组三角形顶点索引，指回 `nodes`。</div>
-        <div class="memory-list-line">颜色按三角形三个顶点的平均值着色，点击地图会插值查询当前位置的节点值。</div>
+        <div class="memory-list-line">页面上的颜色就是按顶点深度平均值着色，点击地图会插值查询当前位置深度。</div>
       </div>
     </div>
 
@@ -55,14 +55,14 @@
       <MapStatus v-if="map" class="map-status" :map="map" />
 
       <div class="panel status-panel">
-        <div class="panel-title">浪 fort.14</div>
+        <div class="panel-title">新水深fort14</div>
         <div class="panel-line">{{ statusText }}</div>
         <div v-if="meshSummary" class="panel-sub">
           节点 {{ meshSummary.numNodes.toLocaleString() }} / 三角形
           {{ meshSummary.numElements.toLocaleString() }}
         </div>
         <div v-if="meshSummary" class="panel-sub">
-          值域 {{ meshSummary.valueMin.toFixed(2) }} ~ {{ meshSummary.valueMax.toFixed(2) }}
+          深度 {{ meshSummary.valueMin.toFixed(2) }} ~ {{ meshSummary.valueMax.toFixed(2) }}
         </div>
         <div class="panel-metric">
           首屏渲染耗时:
@@ -71,7 +71,7 @@
       </div>
 
       <div class="legend">
-        <div class="legend-title">节点值</div>
+        <div class="legend-title">深度 (m)</div>
         <div class="legend-content">
           <div class="legend-bar"></div>
           <div class="legend-labels">
@@ -260,7 +260,7 @@ export default {
   methods: {
     async handleMapReady(map) {
       this.map = map;
-      this.statusText = "正在加载 new-fort14 mesh.json ...";
+      this.statusText = "正在加载 mesh.json ...";
       this.map.on("click", this.handleMapClick);
       this.$nextTick(() => {
         this.map.invalidateSize();
@@ -330,7 +330,7 @@ export default {
         this.meshLayer = new MeshTileLayer(this.meshData, { tileSize: 256 });
         this.meshLayer.once("load", () => {
           this.firstScreenRenderMs = performance.now() - renderStart;
-          this.statusText = "mesh.json 已加载，可点击网格查询节点值";
+          this.statusText = "mesh.json 已加载，可点击网格查询深度";
         });
         this.meshLayer.addTo(this.map);
         this.statusText = "mesh.json 已加载，正在计算首屏渲染耗时...";
@@ -385,7 +385,7 @@ export default {
         ? `<div class="mesh-popup">
             <b>经度:</b> ${lng.toFixed(6)}<br>
             <b>纬度:</b> ${lat.toFixed(6)}<br>
-            <b>节点值:</b> ${result.value.toFixed(2)}<br>
+            <b>深度:</b> ${result.value.toFixed(2)} m<br>
             <b>三角形:</b> #${result.triIndex}
           </div>`
         : `<div class="mesh-popup">
@@ -535,6 +535,7 @@ export default {
   top: 16px;
   right: 16px;
   padding: 14px 16px;
+  min-width: 260px;
 }
 
 .panel-title {
@@ -551,15 +552,15 @@ export default {
 }
 
 .panel-sub {
-  margin-top: 4px;
+  margin-top: 8px;
   font-size: 12px;
-  color: #637788;
+  color: #38566f;
 }
 
 .panel-metric {
-  margin-top: 10px;
+  margin-top: 8px;
   font-size: 12px;
-  color: #526677;
+  color: #38566f;
 }
 
 .panel-metric span {
@@ -572,8 +573,7 @@ export default {
   right: 16px;
   bottom: 16px;
   z-index: 1001;
-  width: 172px;
-  padding: 12px 14px;
+  padding: 10px;
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.94);
   box-shadow: 0 12px 28px rgba(20, 49, 78, 0.14);
@@ -583,28 +583,29 @@ export default {
 .legend-title {
   font-size: 12px;
   font-weight: 600;
-  color: #153048;
   margin-bottom: 8px;
+  text-align: center;
 }
 
 .legend-content {
   display: flex;
-  gap: 8px;
 }
 
 .legend-bar {
-  width: 12px;
-  border-radius: 999px;
-  background: linear-gradient(180deg, rgb(6, 3, 255) 0%, rgb(0, 255, 255) 100%);
+  width: 28px;
+  height: 190px;
+  border: 1px solid #d6dbe2;
+  background: linear-gradient(to bottom, #0603ff, #00ffff);
 }
 
 .legend-labels {
-  flex: 1;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
+  height: 190px;
+  margin-left: 8px;
   font-size: 11px;
-  color: #55697a;
+  color: #556573;
 }
 
 @media (max-width: 960px) {
