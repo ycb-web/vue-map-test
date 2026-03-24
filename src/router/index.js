@@ -8,6 +8,7 @@ import ContourPage from "../views/ContourPage.vue";
 import EditPage from "../views/EditPage.vue";
 import PlaygroundPage from "../views/PlaygroundPage";
 import LeaderLinePage from "../views/LeaderLinePage";
+import TriangleTopicPage from "../views/TriangleTopicPage";
 
 Vue.use(VueRouter);
 
@@ -15,6 +16,15 @@ const routes = [
   {
     path: "/",
     redirect: "/test",
+  },
+  {
+    path: "/triangle-topic",
+    name: "TriangleTopic",
+    component: TriangleTopicPage,
+    meta: {
+      title: "三角网格专题 - Vue地图可视化工具",
+      description: "集中查看 fort.14 三角网格与 NC 点位时序预览",
+    },
   },
   {
     path: "/playground",

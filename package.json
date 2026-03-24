@@ -4,7 +4,9 @@
     "private": true,
     "scripts": {
         "serve": "vue-cli-service serve",
-        "build": "vue-cli-service build"
+        "build": "vue-cli-service build",
+        "triangle:mesh": "node scripts/triangle-topic/convert-fort14-to-mesh.js",
+        "triangle:nc:wave-points": "python3 scripts/triangle-topic/nc_to_wave_points.py"
     },
     "dependencies": {
         "ant-design-vue": "1.7.8",

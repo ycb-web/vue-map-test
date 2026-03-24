@@ -2,6 +2,7 @@
   <div id="app">
     <nav class="nav-bar">
       <router-link to="/test" class="nav-link">测试</router-link>
+      <router-link to="/triangle-topic" class="nav-link">三角网格专题</router-link>
       <router-link to="/wind" class="nav-link">风场</router-link>
       <router-link to="/typhoon" class="nav-link">台风</router-link>
       <router-link to="/wms" class="nav-link">wms</router-link>
@@ -76,6 +77,7 @@ export default {
 .page-container {
   flex: 1;
   position: relative;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 </style>

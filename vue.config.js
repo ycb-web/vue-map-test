@@ -1,4 +1,4 @@
 module.exports = {
   runtimeCompiler: true,
-  lintOnSave: false
-}
+  lintOnSave: false,
+};
