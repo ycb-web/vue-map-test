@@ -6,6 +6,7 @@
         "serve": "vue-cli-service serve",
         "build": "vue-cli-service build",
         "triangle:mesh": "node scripts/triangle-topic/convert-fort14-to-mesh.js",
+        "triangle:mesh:new-fort14": "node src/views/TriangleTopicPage/components/new-fort14/scripts/convert-fort14-to-mesh.js",
         "triangle:nc:wave-points": "python3 scripts/triangle-topic/nc_to_wave_points.py"
     },
     "dependencies": {

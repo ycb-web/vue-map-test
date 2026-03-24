@@ -18,11 +18,29 @@
         >
           波高nc数据模块
         </button>
+        <button
+          type="button"
+          class="topic-tab"
+          :class="{ active: activeTab === 'newFort' }"
+          @click="activeTab = 'newFort'"
+        >
+          浪 fort.14 模块
+        </button>
+        <button
+          type="button"
+          class="topic-tab"
+          :class="{ active: activeTab === 'overlay' }"
+          @click="activeTab = 'overlay'"
+        >
+          fort+nc叠加模块
+        </button>
       </div>
 
       <div class="topic-tab-panel">
         <Fort14MeshPane v-if="activeTab === 'mesh'" />
-        <WavePointsPane v-else />
+        <WavePointsPane v-else-if="activeTab === 'wave'" />
+        <NewFort14MeshPane v-else-if="activeTab === 'newFort'" />
+        <NewFortNcOverlayPane v-else />
       </div>
     </div>
   </div>
@@ -30,12 +48,16 @@
 
 <script>
 import Fort14MeshPane from "./components/water-depth-fort14/Fort14MeshPane.vue";
+import NewFort14MeshPane from "./components/new-fort14/NewFort14MeshPane.vue";
+import NewFortNcOverlayPane from "./components/new-fort14/NewFortNcOverlayPane.vue";
 import WavePointsPane from "./components/wave-points/WavePointsPane.vue";
 
 export default {
   name: "TriangleTopicPage",
   components: {
     Fort14MeshPane,
+    NewFort14MeshPane,
+    NewFortNcOverlayPane,
     WavePointsPane,
   },
   data() {
