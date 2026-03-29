@@ -9,6 +9,7 @@
       <router-link to="/contour" class="nav-link">等值线</router-link>
       <router-link to="/edit" class="nav-link">编辑</router-link>
       <router-link to="/leader" class="nav-link">线引</router-link>
+      <router-link to="/building-flood" class="nav-link">贴体淹没</router-link>
       <router-link to="/playground" class="nav-link playground-link">🎮 演练场</router-link>
     </nav>
     <div class="page-container">

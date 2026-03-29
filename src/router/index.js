@@ -9,6 +9,7 @@ import EditPage from "../views/EditPage.vue";
 import PlaygroundPage from "../views/PlaygroundPage";
 import LeaderLinePage from "../views/LeaderLinePage";
 import TriangleTopicPage from "../views/TriangleTopicPage";
+import BuildingFloodDemoPage from "../views/BuildingFloodDemoPage.vue";
 
 Vue.use(VueRouter);
 
@@ -96,6 +97,15 @@ const routes = [
     meta: {
       title: "引导线 - Vue地图可视化工具",
       description: "引导线可视化组件，支持地图标注引导"
+    },
+  },
+  {
+    path: "/building-flood",
+    name: "BuildingFloodDemo",
+    component: BuildingFloodDemoPage,
+    meta: {
+      title: "构筑物贴体淹没演示 - Vue地图可视化工具",
+      description: "Three.js 构筑物贴体淹没独立演示页面"
     },
   },
 ];
