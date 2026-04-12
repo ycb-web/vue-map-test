@@ -2,6 +2,21 @@
   <div class="typhoon-page">
     <div id="typhoon-map" class="map-container"></div>
     <div class="controls">
+      <div class="control-item control-item-slider">
+        <div class="slider-header">
+          <span>点位大小</span>
+          <span class="slider-value">{{ pointSize }}</span>
+        </div>
+        <input
+          v-model.number="pointSize"
+          class="size-slider"
+          type="range"
+          min="4"
+          max="14"
+          step="1"
+          @input="redraw"
+        />
+      </div>
       <div class="control-item">
         <label>
           <input type="checkbox" v-model="showTrack" @change="redraw" />
@@ -73,8 +88,9 @@
 
 <script>
 import L from "leaflet";
-import typhoonData from "../../typhoon.json";
+import typhoonData from "../../../typhoon.json";
 
+// 台风强度色用于历史点、预报点和当前选中态的统一视觉表达。
 const TYPHOON_COLORS = {
   "Super TY": "#FF0000",
   STY: "#FF00FF",
@@ -107,10 +123,12 @@ export default {
   data() {
     return {
       map: null,
+      // 右侧控件直接驱动重绘，避免分别同步 Leaflet 已存在实例的样式。
       showTrack: true,
       showForecast: true,
       showWindCircle: true,
-      showLabels: true,
+      showLabels: false,
+      pointSize: 4,
       typhoonLayers: [],
       // 动态图层（点击时更新）
       dynamicLayers: [],
@@ -129,9 +147,40 @@ export default {
     }
   },
   methods: {
+    formatPopupTime(timeStr) {
+      const time = new Date(timeStr);
+      return `${time.getMonth() + 1}月${time.getDate()}日${time.getHours()}时`;
+    },
     formatTime(timeStr) {
       const time = new Date(timeStr);
       return `${time.getMonth() + 1}/${time.getDate()} ${time.getHours()}:00`;
+    },
+    getTrackPointRadius() {
+      return this.pointSize;
+    },
+    getHoverPointRadius() {
+      return this.pointSize * 2;
+    },
+    getForecastPointRadius() {
+      return Math.max(3, this.pointSize - 2);
+    },
+    getPopupContent(point, title) {
+      return `
+        <div class="typhoon-popup">
+          <div class="typhoon-popup__title">${title}</div>
+          <div class="typhoon-popup__body">
+            <div class="typhoon-popup__row"><span class="typhoon-popup__label">中心位置：</span>${point.position || `${point.lng}° ${point.lat}°`}</div>
+            <div class="typhoon-popup__row"><span class="typhoon-popup__label">移动方向：</span>${point.move_dir || "--"}</div>
+            <div class="typhoon-popup__row"><span class="typhoon-popup__label">中心气压：</span>${point.pressure || "--"}百帕</div>
+            <div class="typhoon-popup__row"><span class="typhoon-popup__label">风速风力：</span>${point.speed || "--"}米/秒，${point.power || "--"}级（${point.strong || "--"}）</div>
+          </div>
+        </div>
+      `;
+    },
+    getTyphoonDisplayName() {
+      const name = typhoonData.name || "台风";
+      const code = typhoonData.ty_code || "";
+      return `${name}${code}`;
     },
     initMap() {
       this.map = L.map("typhoon-map", {
@@ -141,13 +190,14 @@ export default {
         zoomAnimation: true,
       }).setView([18, 125], 5);
 
+      // 底图使用电子图包，便于路径与风圈叠加时保持清晰。
       L.tileLayer(
-        "https://t0.tianditu.gov.cn/img_w/wmts?tk=93724b915d1898d946ca7dc7b765dda5&SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=img&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TileMatrix={z}&TileCol={x}&TileRow={y}",
+        "https://t0.tianditu.gov.cn/vec_w/wmts?tk=93724b915d1898d946ca7dc7b765dda5&SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=vec&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TileMatrix={z}&TileCol={x}&TileRow={y}",
         { maxZoom: 16, detectRetina: true }
       ).addTo(this.map);
 
       L.tileLayer(
-        "https://t0.tianditu.gov.cn/cia_w/wmts?tk=93724b915d1898d946ca7dc7b765dda5&SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=cia&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TileMatrix={z}&TileCol={x}&TileRow={y}",
+        "https://t0.tianditu.gov.cn/cva_w/wmts?tk=93724b915d1898d946ca7dc7b765dda5&SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=cva&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TileMatrix={z}&TileCol={x}&TileRow={y}",
         { transparent: true, zIndex: 3 }
       ).addTo(this.map);
     },
@@ -160,6 +210,7 @@ export default {
       this.dynamicLayers = [];
     },
     redraw() {
+      // 当前页面的交互规模不大，直接全量重绘比增量更新更稳。
       this.clearLayers();
       this.clearDynamicLayers();
       this.selectedPoint = null;
@@ -189,7 +240,7 @@ export default {
       const data = typhoonData.data;
       if (index < 0 || index >= data.length) return;
 
-      // 清除之前的动态图层
+      // 选中态只影响风圈、预报线和 current point，统一归到动态图层。
       this.clearDynamicLayers();
 
       this.selectedIndex = index;
@@ -220,22 +271,38 @@ export default {
     },
     highlightSelectedPoint() {
       const p = this.selectedPoint;
-      const highlight = L.circleMarker([p.lat, p.lng], {
-        radius: 12,
-        fillColor: "transparent",
-        color: "#fff",
-        weight: 3,
-        opacity: 1,
+      const color = getTyphoonColor(p.strong);
+      const highlight = L.marker([p.lat, p.lng], {
+        icon: L.divIcon({
+          className: "current-point-icon",
+          html: `
+            <div class="current-point-spinner" style="color:${color}">
+              <svg viewBox="0 0 200 200" aria-hidden="true">
+                <path
+                  fill="currentColor"
+                  stroke="#ffffff"
+                  stroke-width="5"
+                  stroke-miterlimit="10"
+                  d="M191.7 75.6c-37.9-43-87.3-43-87.3-43l.1.1c-1.6-.1-3.3-.3-5-.3-36.4 0-65.9 29.5-65.9 65.9 0 14.1 4.5 27.2 12 37.9-19.5-8.3-36.3-20-36.3-20 28.4 47.7 84.8 47.7 84.8 47.7l-.1 0c1.8.1 3.6.3 5.4.3 36.4 0 65.9-29.5 65.9-65.9 0-16-5.7-30.7-15.2-42.1 21.7 7.1 41.6 19.4 41.6 19.4Z"
+                />
+                <circle cx="99.6" cy="98.3" r="27.2" fill="#fff" />
+              </svg>
+            </div>
+          `,
+          iconSize: [28, 28],
+          iconAnchor: [14, 14],
+        }),
+        interactive: false,
+        zIndexOffset: 1000,
       });
       highlight.addTo(this.map);
       this.dynamicLayers.push(highlight);
     },
     drawPointWindCircle(point) {
-      // 7级风圈
+      // 风圈按等级独立绘制，方便后续单独调整配色或显隐规则。
       if (point.radius7 > 0 || point.en7 > 0) {
         const circle7 = this.createWindCircle(point, 7);
 
-        console.log(circle7, 'circle7')
         if (circle7) {
           circle7.addTo(this.map);
           this.dynamicLayers.push(circle7);
@@ -272,14 +339,12 @@ export default {
       const wn = point[wnKey] || point[radiusKey] || 0;
       const ws = point[wsKey] || point[radiusKey] || 0;
 
-      console.log(`en: ${en}, es: ${es}, wn: ${wn}, ws: ${ws}`)
-
       if (en === 0 && es === 0 && wn === 0 && ws === 0) return null;
 
       const colors = { 7: "#00FF00", 10: "#FFFF00", 12: "#FF0000" };
       const color = colors[level] || "#00FF00";
 
-      // 如果四个方向半径相同，使用真正的圆
+      // 四向半径一致时直接用真圆，渲染开销更低。
       if (en === es && es === ws && ws === wn) {
         return L.circle([point.lat, point.lng], {
           radius: en * 1000,
@@ -291,7 +356,7 @@ export default {
         });
       }
 
-      // 非对称风圈：增加点数并禁用简化
+      // 非对称风圈用多边形近似，保证四象限半径差异能被看出来。
       const points = [];
       const segments = 360;
 
@@ -335,7 +400,7 @@ export default {
 
         if (!forecastPoints || forecastPoints.length === 0) return;
 
-        // 从当前点连接到预报第一点
+        // 预报线保留机构色，预报点本身仍按强度色显示。
         const startPoint = [point.lat, point.lng];
         const allPoints = [
           startPoint,
@@ -354,25 +419,19 @@ export default {
 
         // 绘制预报点
         forecastPoints.forEach((p) => {
+          const pointColor = getTyphoonColor(p.strong);
           const marker = L.circleMarker([p.lat, p.lng], {
-            radius: 4,
-            fillColor: color,
-            color: color,
+            radius: this.getTrackPointRadius(),
+            fillColor: pointColor,
+            color: "#222222",
             weight: 1,
-            fillOpacity: 0.8,
+            fillOpacity: 1,
           });
 
-          const time = new Date(p.time);
-          const timeStr = `${
-            time.getMonth() + 1
-          }/${time.getDate()} ${time.getHours()}时`;
-          marker.bindPopup(`
-            <b>${source}预报</b><br/>
-            ${timeStr}<br/>
-            强度: ${p.strong || "--"}<br/>
-            风速: ${p.speed} m/s<br/>
-            ${p.pressure ? "气压: " + p.pressure + " hPa" : ""}
-          `);
+          const timeStr = this.formatPopupTime(p.time);
+          marker.bindPopup(this.getPopupContent(p, `【${source}预报】${timeStr}`), {
+            className: "typhoon-popup-wrap",
+          });
 
           marker.addTo(this.map);
           this.dynamicLayers.push(marker);
@@ -395,44 +454,40 @@ export default {
       });
     },
     drawTrack(data) {
-      // 绘制路径线（分段着色）
+      // 历史路径线统一深色，突出时间序列关系而不是强度分段。
       for (let i = 0; i < data.length - 1; i++) {
-        const color = getTyphoonColor(data[i].strong);
         const line = L.polyline(
           [
             [data[i].lat, data[i].lng],
             [data[i + 1].lat, data[i + 1].lng],
           ],
-          { color: color, weight: 3 }
+          { color: "#222222", weight: 3 }
         );
         line.addTo(this.map);
         this.typhoonLayers.push(line);
       }
 
-      // 绘制路径点
+      // 历史点承担主要交互，hover、popup 和首点名称都挂在这里。
       data.forEach((p, index) => {
         const color = getTyphoonColor(p.strong);
         const marker = L.circleMarker([p.lat, p.lng], {
-          radius: 6,
+          radius: this.getTrackPointRadius(),
           fillColor: color,
-          color: "#fff",
-          weight: 2,
+          color: "#222222",
+          weight: 1,
           fillOpacity: 1,
         });
 
-        const time = new Date(p.time);
-        const timeStr = `${
-          time.getMonth() + 1
-        }/${time.getDate()} ${time.getHours()}时`;
+        const timeStr = this.formatPopupTime(p.time);
 
         // 鼠标悬停放大效果
-        marker.on("mouseover", function () {
-          this.setRadius(9);
-          this.setStyle({ weight: 3 });
+        marker.on("mouseover", () => {
+          marker.setRadius(this.getHoverPointRadius());
+          marker.setStyle({ weight: 1 });
         });
-        marker.on("mouseout", function () {
-          this.setRadius(6);
-          this.setStyle({ weight: 2 });
+        marker.on("mouseout", () => {
+          marker.setRadius(this.getTrackPointRadius());
+          marker.setStyle({ weight: 1 });
         });
 
         // 点击事件
@@ -440,20 +495,28 @@ export default {
           this.selectPoint(index);
         });
 
-        marker.bindPopup(`
-          <b>${timeStr}</b><br/>
-          强度: ${p.strong || "--"}<br/>
-          风速: ${p.speed} m/s<br/>
-          气压: ${p.pressure} hPa<br/>
-          移向: ${p.move_dir || "--"}<br/>
-          移速: ${p.move_speed || "--"} km/h<br/>
-          <small>点击查看该时刻预报</small>
-        `);
+        marker.bindPopup(this.getPopupContent(p, `【黑格比】${timeStr}`), {
+          className: "typhoon-popup-wrap",
+        });
 
         marker.addTo(this.map);
         this.typhoonLayers.push(marker);
 
-        // 标注
+        if (index === 0) {
+          const nameLabel = L.marker([p.lat, p.lng], {
+            icon: L.divIcon({
+              className: "typhoon-name-label",
+              html: `<span>${this.getTyphoonDisplayName()}</span>`,
+              iconSize: [120, 24],
+              iconAnchor: [-16, 12],
+            }),
+            interactive: false,
+          });
+          nameLabel.addTo(this.map);
+          this.typhoonLayers.push(nameLabel);
+        }
+
+        // 时间标注默认关闭，需要时按固定间隔显示避免遮挡。
         if (this.showLabels && index % 4 === 0) {
           const label = L.marker([p.lat, p.lng], {
             icon: L.divIcon({
@@ -485,11 +548,19 @@ export default {
         }月${time.getDate()}日 ${time.getHours()}:${String(
           time.getMinutes()
         ).padStart(2, "0")}`;
-        marker.bindPopup(`
-          <b>登陆点</b><br/>
-          位置: ${land.position}<br/>
-          时间: ${timeStr}
-        `);
+        marker.bindPopup(
+          `
+            <div class="typhoon-popup">
+              <div class="typhoon-popup__title">【登陆点】${timeStr}</div>
+              <div class="typhoon-popup__body">
+                <div class="typhoon-popup__row"><span class="typhoon-popup__label">位置：</span>${land.position}</div>
+              </div>
+            </div>
+          `,
+          {
+            className: "typhoon-popup-wrap",
+          }
+        );
 
         marker.addTo(this.map);
         this.typhoonLayers.push(marker);
@@ -525,8 +596,29 @@ export default {
 .control-item {
   margin-bottom: 10px;
 }
+.control-item-slider {
+  margin-bottom: 14px;
+}
 .control-item:last-child {
   margin-bottom: 0;
+}
+.slider-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  font-size: 13px;
+  color: #333;
+}
+.slider-value {
+  min-width: 24px;
+  text-align: right;
+  color: #1890ff;
+  font-weight: 600;
+}
+.size-slider {
+  width: 100%;
+  cursor: pointer;
 }
 label {
   cursor: pointer;
@@ -594,6 +686,65 @@ input[type="checkbox"] {
 </style>
 
 <style>
+.typhoon-popup-wrap .leaflet-popup-content-wrapper {
+  padding: 0;
+  border-radius: 0;
+  box-shadow: 0 4px 14px rgba(0, 39, 92, 0.24);
+}
+.typhoon-popup-wrap .leaflet-popup-content {
+  margin: 0;
+  min-width: 252px;
+}
+.typhoon-popup-wrap .leaflet-popup-tip {
+  background: #f6fbff;
+}
+.typhoon-popup {
+  border: 1px solid #8ec5ff;
+  background: #f6fbff;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #3f4c5a;
+}
+.typhoon-popup__title {
+  padding: 5px 10px;
+  background: #cfe3ff;
+  color: #1465d9;
+  font-weight: 700;
+  border-bottom: 1px solid #9fc7fb;
+}
+.typhoon-popup__body {
+  padding: 8px 10px 10px;
+}
+.typhoon-popup__row + .typhoon-popup__row {
+  margin-top: 2px;
+}
+.typhoon-popup__label {
+  color: #1465d9;
+  font-weight: 700;
+}
+.current-point-icon {
+  background: transparent;
+  border: 0;
+}
+.current-point-spinner {
+  width: 28px;
+  height: 28px;
+  animation: current-point-spin 2.4s linear infinite;
+  transform-origin: center;
+}
+.current-point-spinner svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+@keyframes current-point-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
 .typhoon-label span {
   font-size: 11px;
   color: #333;
@@ -604,5 +755,34 @@ input[type="checkbox"] {
 }
 .forecast-label span {
   font-size: 11px;
+}
+.typhoon-name-label {
+  background: transparent;
+  border: 0;
+}
+.typhoon-name-label span {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border: 1px solid #8fb7f3;
+  background: #ffffff;
+  color: #4d5e74;
+  font-size: 12px;
+  white-space: nowrap;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+.typhoon-name-label span::before {
+  content: "";
+  position: absolute;
+  left: -7px;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  background: #ffffff;
+  border-left: 1px solid #8fb7f3;
+  border-bottom: 1px solid #8fb7f3;
+  transform: translateY(-50%) rotate(45deg);
 }
 </style>

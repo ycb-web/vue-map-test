@@ -2,7 +2,7 @@ import Vue from "vue";
 import VueRouter from "vue-router";
 import TestPage from "../views/TestPage";
 import WindPage from "../views/WindPage";
-import TyphoonPage from "../views/TyphoonPage.vue";
+import TyphoonPage from "../views/TyphoonPage";
 import WmsPage from "../views/WmsPage.vue";
 import ContourPage from "../views/ContourPage.vue";
 import EditPage from "../views/EditPage.vue";

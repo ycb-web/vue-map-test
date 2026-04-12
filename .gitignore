@@ -25,4 +25,4 @@ yarn-error.log*
 *.sln
 *.sw?
 
-/地图-三角图层
+/triangle-layer
