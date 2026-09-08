@@ -89,7 +89,7 @@
             <input type="checkbox" v-model="showWaveLayer" @change="toggleWaveLayer" />
             <span>显示海浪等值面</span>
           </label>
-          <span class="badge">{{ featureCount }} 个面要素</span>
+          <span class="badge">{{ loadingData ? "加载数据中..." : `${featureCount} 个面要素` }}</span>
         </div>
 
         <div v-if="showWaveLayer" class="sub-controls">
@@ -203,7 +203,6 @@
 import L from "leaflet";
 import MapToolbar from "@/components/MapToolbar";
 import MapStatus from "@/components/MapStatus";
-import waveIsoData from "@/assets/data/getWavelsosurface3583.json";
 
 export default {
   name: "LabPage",
@@ -215,11 +214,12 @@ export default {
     return {
       map: null,
       isCollapsed: false,
-      // 海浪等值面数据源与上传控制
-      currentWaveData: waveIsoData,
-      defaultWaveData: waveIsoData,
+      // 海浪等值面数据源与上传控制（通过接口/文件异步加载，不打包进代码）
+      currentWaveData: null,
+      defaultWaveData: null,
       uploadedFileName: "",
-      featureCount: (waveIsoData && waveIsoData.features && waveIsoData.features.length) || 0,
+      featureCount: 0,
+      loadingData: false,
 
       // 海浪等值面控制
       showWaveLayer: true,
@@ -259,8 +259,8 @@ export default {
   },
   mounted() {
     this.initMap();
-    this.renderWaveIsoLayer();
     this.initLandMaskLayer();
+    this.loadDefaultWaveData();
     this.fitWaveBounds();
   },
   beforeDestroy() {
@@ -802,9 +802,41 @@ export default {
       reader.readAsText(file);
     },
 
-    restoreDefaultData() {
+    async loadDefaultWaveData() {
+      this.loadingData = true;
+      try {
+        const baseUrl = process.env.BASE_URL || "/";
+        const res = await fetch(`${baseUrl}data/getWavelsosurface3583.json`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        this.defaultWaveData = data;
+        this.currentWaveData = data;
+        this.featureCount =
+          (data && data.features && data.features.length) || 0;
+        this.cachedSmoothedData = null;
+        this.cachedRawData = null;
+        this.renderWaveIsoLayer();
+      } catch (err) {
+        console.error("加载海浪等值面数据失败:", err);
+        if (this.$message) {
+          this.$message.error("加载海浪数据失败: " + (err.message || "未知错误"));
+        }
+      } finally {
+        this.loadingData = false;
+      }
+    },
+
+    async restoreDefaultData() {
+      if (!this.defaultWaveData) {
+        await this.loadDefaultWaveData();
+        return;
+      }
       this.currentWaveData = this.defaultWaveData;
-      this.featureCount = (this.defaultWaveData && this.defaultWaveData.features && this.defaultWaveData.features.length) || 0;
+      this.featureCount =
+        (this.defaultWaveData &&
+          this.defaultWaveData.features &&
+          this.defaultWaveData.features.length) ||
+        0;
       this.uploadedFileName = "";
       this.cachedSmoothedData = null;
       this.cachedRawData = null;
