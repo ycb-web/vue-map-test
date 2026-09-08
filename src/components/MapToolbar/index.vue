@@ -86,43 +86,45 @@
       </svg>
     </div>
 
-    <div class="divider"></div>
+    <template v-if="showBasemap">
+      <div class="divider"></div>
 
-    <!-- 底图切换：点击弹出底图选择面板 -->
-    <a-popover
-      trigger="click"
-      placement="bottom"
-      v-model="basemapPopoverVisible"
-    >
-      <template slot="content">
-        <div class="basemap-list">
-          <!-- 遍历底图列表，显示缩略图或占位符 -->
-          <div
-            v-for="(item, index) in basemaps"
-            :key="index"
-            class="basemap-item"
-            :class="{ active: currentBasemapIndex === index }"
-            @click="switchBasemap(index)"
-          >
-            <!-- 有缩略图则显示图片 -->
-            <img v-if="item.thumbnail" :src="item.thumbnail" :alt="item.name" />
-            <!-- 无缩略图则显示文字占位符 -->
-            <div v-else class="basemap-placeholder">{{ item.name }}</div>
-            <span>{{ item.name }}</span>
+      <!-- 底图切换：点击弹出底图选择面板 -->
+      <a-popover
+        trigger="click"
+        placement="bottom"
+        v-model="basemapPopoverVisible"
+      >
+        <template slot="content">
+          <div class="basemap-list">
+            <!-- 遍历底图列表，显示缩略图或占位符 -->
+            <div
+              v-for="(item, index) in basemaps"
+              :key="index"
+              class="basemap-item"
+              :class="{ active: currentBasemapIndex === index }"
+              @click="switchBasemap(index)"
+            >
+              <!-- 有缩略图则显示图片 -->
+              <img v-if="item.thumbnail" :src="item.thumbnail" :alt="item.name" />
+              <!-- 无缩略图则显示文字占位符 -->
+              <div v-else class="basemap-placeholder">{{ item.name }}</div>
+              <span>{{ item.name }}</span>
+            </div>
           </div>
+        </template>
+        <div class="tool-item" title="底图切换">
+          <svg viewBox="0 0 24 24" width="20" height="20">
+            <path
+              d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            />
+          </svg>
         </div>
-      </template>
-      <div class="tool-item" title="底图切换">
-        <svg viewBox="0 0 24 24" width="20" height="20">
-          <path
-            d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-          />
-        </svg>
-      </div>
-    </a-popover>
+      </a-popover>
+    </template>
 
     <!-- 工具箱按钮：点击弹出测量工具选择面板 -->
     <a-popover trigger="click" placement="bottom" v-model="toolsPopoverVisible">
@@ -269,6 +271,14 @@ export default {
         ];
       },
     },
+
+    /**
+     * 是否启用底图切换与自动加载底图（设为 false 则不加载天地图等底图，提升加载性能）
+     */
+    showBasemap: {
+      type: Boolean,
+      default: true,
+    },
   },
 
   data() {
@@ -350,6 +360,11 @@ export default {
 
       // 设置初始视图
       this.map.setView(this.initialCenter, this.initialZoom);
+
+      if (!this.showBasemap) {
+        this.hasInitialized = true;
+        return;
+      }
 
       // 找到 initSelect: true 的底图索引，没有则用第一个
       var defaultIndex = this.basemaps.findIndex(function (item) {

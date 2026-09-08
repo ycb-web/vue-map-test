@@ -1,14 +1,15 @@
 <template>
   <div class="lab-page">
-    <!-- 地图容器 -->
-    <div id="lab-map" class="map-container"></div>
+    <!-- 地图容器（底图背景随主题动态切换，不垫天地图底图） -->
+    <div id="lab-map" class="map-container" :style="{ background: mapBgColor }"></div>
 
-    <!-- 地图通用工具栏（固定初始全球视角及复位中心） -->
+    <!-- 地图通用工具栏（设 show-basemap 为 false，完全去除底层天地图与底图切换） -->
     <MapToolbar
       class="toolbar"
       :map="map"
       :initial-center="[15, 0]"
       :initial-zoom="2"
+      :show-basemap="false"
       @reset="resetView"
       @reset-view="resetView"
     />
@@ -250,6 +251,12 @@ export default {
       ],
     };
   },
+  computed: {
+    // 纯数据底色：根据掩膜主题动态适应，不加载任何外部第三方底图瓦片
+    mapBgColor() {
+      return this.maskTheme === "darklandmap" ? "#0f172a" : "#cad2d3";
+    },
+  },
   mounted() {
     this.initMap();
     this.renderWaveIsoLayer();
@@ -294,7 +301,6 @@ export default {
       });
 
       // 1. 创建图层分层 Pane（确保三明治夹心层级关系绝对正确）
-      // 底层: 底图 (tilePane, zIndex 200)
       // 叠加层: 等值面矢量切片 (wavePane, zIndex 400)
       if (!this.map.getPane("wavePane")) {
         const wavePane = this.map.createPane("wavePane");
@@ -306,13 +312,6 @@ export default {
         const maskPane = this.map.createPane("landMaskPane");
         maskPane.style.zIndex = "450";
         maskPane.style.pointerEvents = "none";
-      }
-
-      // 顶层标注 pane: 地名标注 (zIndex 500, 浮在掩膜之上，文字不会被遮盖)
-      if (!this.map.getPane("labelsPane")) {
-        const labelsPane = this.map.createPane("labelsPane");
-        labelsPane.style.zIndex = "500";
-        labelsPane.style.pointerEvents = "none";
       }
 
       // 顶层标注 pane: 地名标注 (zIndex 500, 浮在掩膜之上，文字不会被遮盖)
@@ -828,7 +827,12 @@ export default {
 .map-container {
   width: 100%;
   height: 100%;
-  background: #0f172a;
+  background: #cad2d3;
+  transition: background 0.3s ease;
+}
+
+:deep(.leaflet-container) {
+  background-color: transparent !important;
 }
 
 .toolbar {
