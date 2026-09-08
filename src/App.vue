@@ -1,6 +1,7 @@
 <template>
   <div id="app">
     <nav class="nav-bar">
+      <router-link to="/wave" class="nav-link">海浪等值面</router-link>
       <router-link to="/test" class="nav-link">测试</router-link>
       <router-link to="/triangle-topic" class="nav-link">三角网格专题</router-link>
       <router-link to="/wind" class="nav-link">风场</router-link>

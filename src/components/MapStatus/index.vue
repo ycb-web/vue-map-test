@@ -99,8 +99,9 @@ export default {
      * 更新当前鼠标位置的经纬度
      */
     onMouseMove: function (e) {
-      this.lat = e.latlng.lat;
-      this.lng = e.latlng.lng;
+      var wrapped = e.latlng && e.latlng.wrap ? e.latlng.wrap() : e.latlng;
+      this.lat = wrapped.lat;
+      this.lng = wrapped.lng;
     },
     /**
      * 缩放结束事件处理

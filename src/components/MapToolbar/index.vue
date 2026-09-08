@@ -370,12 +370,16 @@ export default {
 
       // 添加标注图层（如果有）
       if (basemap.labelUrl) {
+        var hasLabelsPane = this.map.getPane && this.map.getPane("labelsPane");
         this.labelLayer = L.tileLayer(basemap.labelUrl, {
           transparent: true,
           maxZoom: 18,
+          pane: hasLabelsPane ? "labelsPane" : undefined,
         });
         this.labelLayer.addTo(this.map);
-        this.labelLayer.setZIndex(1);
+        if (!hasLabelsPane) {
+          this.labelLayer.setZIndex(1);
+        }
       }
 
       this.currentBasemapIndex = defaultIndex;
@@ -395,6 +399,7 @@ export default {
      */
     handleLocate() {
       this.$emit("reset");
+      this.$emit("reset-view");
       if (this.map) {
         this.map.setView(this.initialCenter, this.initialZoom);
       }
@@ -488,12 +493,16 @@ export default {
 
       // 添加新的标注图层（如果有）
       if (basemap.labelUrl) {
+        var hasLabelsPane = this.map.getPane && this.map.getPane("labelsPane");
         this.labelLayer = L.tileLayer(basemap.labelUrl, {
           transparent: true,
           maxZoom: 18,
+          pane: hasLabelsPane ? "labelsPane" : undefined,
         });
         this.labelLayer.addTo(this.map);
-        this.labelLayer.setZIndex(1);
+        if (!hasLabelsPane) {
+          this.labelLayer.setZIndex(1);
+        }
       }
 
       // 更新当前底图索引

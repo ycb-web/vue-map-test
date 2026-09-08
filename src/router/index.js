@@ -10,13 +10,14 @@ import PlaygroundPage from "../views/PlaygroundPage";
 import LeaderLinePage from "../views/LeaderLinePage";
 import TriangleTopicPage from "../views/TriangleTopicPage";
 import BuildingFloodDemoPage from "../views/BuildingFloodDemoPage.vue";
+import LabPage from "../views/LabPage";
 
 Vue.use(VueRouter);
 
 const routes = [
   {
     path: "/",
-    redirect: "/test",
+    redirect: "/wave",
   },
   {
     path: "/triangle-topic",
@@ -107,6 +108,19 @@ const routes = [
       title: "构筑物贴体淹没演示 - Vue地图可视化工具",
       description: "Three.js 构筑物贴体淹没独立演示页面"
     },
+  },
+  {
+    path: "/wave",
+    name: "WaveIso",
+    component: LabPage,
+    meta: {
+      title: "海浪等值面 - Vue地图可视化工具",
+      description: "海浪有效波高等值面与色斑图层展示"
+    },
+  },
+  {
+    path: "/lab",
+    redirect: "/wave",
   },
 ];
 
