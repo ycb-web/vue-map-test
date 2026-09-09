@@ -174,6 +174,22 @@
           </div>
         </div>
 
+        <!-- 测试数据源切换 -->
+        <div class="section-title" style="margin-top: 10px">测试数据源切换</div>
+        <div class="dataset-btn-grid">
+          <button
+            v-for="ds in datasetList"
+            :key="ds.id"
+            class="dataset-toggle-btn"
+            :class="{ active: activeDatasetId === ds.id && !uploadedFileName }"
+            :disabled="loadingData"
+            @click="switchDataset(ds.id)"
+          >
+            <span class="ds-icon">🌊</span>
+            <span class="ds-name">{{ ds.name }}</span>
+          </button>
+        </div>
+
         <!-- 自定义 GeoJSON 数据上传 -->
         <div class="section-title" style="margin-top: 10px">自定义等值面数据</div>
         <div class="upload-container">
@@ -189,8 +205,8 @@
           </button>
           <div v-if="uploadedFileName" class="upload-file-status">
             <span class="file-name" :title="uploadedFileName">📄 {{ uploadedFileName }}</span>
-            <button class="restore-btn" @click="restoreDefaultData" title="还原为初始数据">
-              还原初始
+            <button class="restore-btn" @click="restoreDefaultData" title="还原为预设测试数据">
+              还原预设
             </button>
           </div>
         </div>
@@ -214,9 +230,24 @@ export default {
     return {
       map: null,
       isCollapsed: false,
-      // 海浪等值面数据源与上传控制（通过接口/文件异步加载，不打包进代码）
+      // 海浪等值面双测试数据集与切换控制
+      datasetList: [
+        {
+          id: "2026090720",
+          name: "数据 2026090720",
+          fileName: "wave-fc-2026090720-swh.geojson",
+          featureCount: 1513,
+        },
+        {
+          id: "2026090820",
+          name: "数据 2026090820",
+          fileName: "wave-fc-2026090820-swh.small.geojson",
+          featureCount: 1500,
+        },
+      ],
+      activeDatasetId: "2026090720",
+      datasetCache: {}, // 内存二级缓存 { [id]: GeoJSON }，支持 0 毫秒秒切
       currentWaveData: null,
-      defaultWaveData: null,
       uploadedFileName: "",
       featureCount: 0,
       loadingData: false,
@@ -260,7 +291,7 @@ export default {
   mounted() {
     this.initMap();
     this.initLandMaskLayer();
-    this.loadDefaultWaveData();
+    this.loadDataset(this.activeDatasetId);
     this.fitWaveBounds();
   },
   beforeDestroy() {
@@ -849,54 +880,83 @@ export default {
     },
 
     /**
-     * 【数据源异步拉取】动态加载海浪等值面 GeoJSON 数据
+     * 【数据源异步拉取与切换】加载指定 ID 的海浪等值面 GeoJSON 数据
      * 架构决策：
-     *  1. 避免使用 Webpack 静态 import 将 500KB+ 的 GeoJSON 打包进 app.js，导致主包体积膨胀
-     *  2. 采用标准 fetch 异步拉取公共目录静态资源（/data/getWavelsosurface3583.json）
-     *  3. 完全对标生产环境接口行为（在浏览器 Network 面板可查看清晰的 200 请求与数据流）
-     *  4. 数据拉取后注入 defaultWaveData 与 currentWaveData 内存变量，供切片引擎和空间拾取直接使用
+     *  1. 采用标准 fetch 异步动态加载公共资源，解耦构建包体积；
+     *  2. 引入 datasetCache 内存二级缓存字典，二次点击直接读内存，实现 0 延迟秒切；
+     *  3. 切换时自动清空 Chaikin 几何平滑缓存并重新触发 VectorGrid 切片光栅化渲染；
+     *  4. 空间射线拾取（queryWaveFeature）实时绑定当前激活数据集。
+     * @param {string} datasetId 数据集 ID（'2026090720' 或 '2026090820'）
+     * @param {boolean} forceRefresh 是否强制重新发起网络请求
      */
-    async loadDefaultWaveData() {
-      this.loadingData = true;
-      try {
-        const baseUrl = process.env.BASE_URL || "/";
-        const res = await fetch(`${baseUrl}data/getWavelsosurface3583.json`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        this.defaultWaveData = data;
-        this.currentWaveData = data;
+    async loadDataset(datasetId, forceRefresh = false) {
+      const targetConfig =
+        this.datasetList.find((d) => d.id === datasetId) || this.datasetList[0];
+      if (!targetConfig) return;
+
+      this.activeDatasetId = targetConfig.id;
+      this.uploadedFileName = ""; // 清空上传外部文件标记
+
+      // 1. 优先读取内存二级缓存，实现 0 毫秒秒级切换
+      if (!forceRefresh && this.datasetCache[targetConfig.id]) {
+        const cachedData = this.datasetCache[targetConfig.id];
+        this.currentWaveData = cachedData;
         this.featureCount =
-          (data && data.features && data.features.length) || 0;
+          (cachedData && cachedData.features && cachedData.features.length) || 0;
         this.cachedSmoothedData = null;
         this.cachedRawData = null;
         this.renderWaveIsoLayer();
+        return;
+      }
+
+      // 2. 未命中缓存时发起异步 fetch
+      this.loadingData = true;
+      try {
+        const baseUrl = process.env.BASE_URL || "/";
+        const res = await fetch(`${baseUrl}data/${targetConfig.fileName}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+
+        // 写入内存二级缓存
+        this.datasetCache[targetConfig.id] = data;
+
+        // 若当前选中的仍是该数据集，则更新图层并渲染
+        if (this.activeDatasetId === targetConfig.id) {
+          this.currentWaveData = data;
+          this.featureCount =
+            (data && data.features && data.features.length) || 0;
+          this.cachedSmoothedData = null;
+          this.cachedRawData = null;
+          this.renderWaveIsoLayer();
+        }
       } catch (err) {
-        console.error("加载海浪等值面数据失败:", err);
+        console.error(`加载海浪等值面 [${targetConfig.name}] 失败:`, err);
         if (this.$message) {
-          this.$message.error("加载海浪数据失败: " + (err.message || "未知错误"));
+          this.$message.error(
+            `加载 [${targetConfig.name}] 失败: ` + (err.message || "未知错误")
+          );
         }
       } finally {
         this.loadingData = false;
       }
     },
 
-    async restoreDefaultData() {
-      if (!this.defaultWaveData) {
-        await this.loadDefaultWaveData();
-        return;
-      }
-      this.currentWaveData = this.defaultWaveData;
-      this.featureCount =
-        (this.defaultWaveData &&
-          this.defaultWaveData.features &&
-          this.defaultWaveData.features.length) ||
-        0;
-      this.uploadedFileName = "";
-      this.cachedSmoothedData = null;
-      this.cachedRawData = null;
-      this.renderWaveIsoLayer();
+    /**
+     * 【切换数据集交互】
+     * @param {string} datasetId
+     */
+    switchDataset(datasetId) {
+      if (this.activeDatasetId === datasetId && !this.uploadedFileName) return;
+      this.loadDataset(datasetId);
+    },
+
+    /**
+     * 【恢复预设数据集】
+     */
+    restoreDefaultData() {
+      this.loadDataset(this.activeDatasetId || "2026090720", false);
       this.fitWaveBounds();
-      this.$message.info("已恢复初始海浪数据");
+      this.$message.info("已切回预设测试数据");
     },
   },
 };
@@ -1176,6 +1236,56 @@ input[type="range"] {
   text-align: center;
   border: 1px solid rgba(0, 0, 0, 0.1);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+/* 测试数据源双按钮切换网格 */
+.dataset-btn-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.dataset-toggle-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 8px 6px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 6px;
+  border: 1px solid #d1d5db;
+  background: #f9fafb;
+  color: #374151;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  white-space: nowrap;
+}
+
+.dataset-toggle-btn:hover:not(:disabled) {
+  border-color: #3b82f6;
+  color: #2563eb;
+  background: #eff6ff;
+  transform: translateY(-1px);
+}
+
+.dataset-toggle-btn.active {
+  background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%);
+  border-color: #1d4ed8;
+  color: #ffffff;
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.35);
+}
+
+.dataset-toggle-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.dataset-toggle-btn .ds-icon {
+  font-size: 13px;
 }
 
 /* 自定义 GeoJSON 上传控制 */
