@@ -116,7 +116,7 @@
           </div>
 
           <div class="control-row" style="margin-top: 6px">
-            <label class="checkbox-label">
+            <label class="checkbox-label" style="font-size: 12px">
               <input
                 type="checkbox"
                 v-model="smoothCurves"
@@ -124,9 +124,18 @@
               />
               <b style="color: #0284c7">圆滑拐角平滑 (对齐 HiFleet)</b>
             </label>
-            <span v-if="smoothCurves" class="badge" style="font-size: 10px; color: #0284c7; background: #e0f2fe">
-              Chaikin 1轮迭代
-            </span>
+            <div class="iter-btn-group">
+              <button
+                v-for="n in [1, 2, 3]"
+                :key="n"
+                class="iter-btn"
+                :class="{ active: smoothCurves && smoothIterations === n }"
+                @click="setSmoothIterations(n)"
+                :title="`Chaikin ${n} 轮割角平滑`"
+              >
+                {{ n }}次
+              </button>
+            </div>
           </div>
         </div>
 
@@ -181,7 +190,17 @@
         </div>
 
         <!-- 测试数据源切换 -->
-        <div class="section-title" style="margin-top: 8px">测试数据源切换</div>
+        <div class="section-header-row" style="margin-top: 8px">
+          <div class="section-title">测试数据源切换</div>
+          <label
+            class="cache-toggle-label"
+            :class="{ active: enableCache }"
+            title="默认关闭：模拟生产环境播放条每次推送新数据时实时解析与渲染。开启后缓存图层实例实现 0ms 瞬切"
+          >
+            <input type="checkbox" v-model="enableCache" @change="toggleCacheMode" />
+            <span>开启缓存</span>
+          </label>
+        </div>
         <div class="dataset-btn-grid">
           <button
             v-for="ds in datasetList"
@@ -261,6 +280,7 @@ export default {
       datasetCache: {}, // 内存二级缓存 { [id]: GeoJSON }，支持 0 毫秒秒切
       processedDataCache: {}, // 预处理跨世界数据缓存 { [id]: MultiWorldGeoJSON }，切换时免重复计算
       layerCache: {}, // 图层实例缓存 { [id]: L.GeoJSON }，已构建图层切帧直接 0ms 瞬间挂载（完全对标 HiFleet 时间轴）
+      enableCache: false, // 图层缓存开关（默认关闭：对标真实生产环境播放条，每次推送新数据时实时解析与渲染）
       currentWaveData: null,
       uploadedFileName: "",
       featureCount: 0,
@@ -799,10 +819,41 @@ export default {
         this.waveGeoJsonLayer = null;
       }
       this.renderWaveIsoLayer();
-      if (this.activeDatasetId && this.waveGeoJsonLayer) {
+      if (this.enableCache && this.activeDatasetId && this.waveGeoJsonLayer) {
         this.layerCache[this.activeDatasetId] = this.waveGeoJsonLayer;
       }
-      this.preloadNextDataset();
+      if (this.enableCache) {
+        this.preloadNextDataset();
+      }
+    },
+
+    /**
+     * 【切换图层缓存开关】
+     * 默认关闭：对标真实生产环境播放条，每次推送新数据时实时解析与渲染；
+     * 开启时：缓存各时段图层实例，实现切帧 0ms 瞬间挂载与后台预热。
+     */
+    toggleCacheMode() {
+      if (!this.enableCache) {
+        // 关闭缓存：清空已缓存的图层实例，后续切换每次强制实时重算重绘
+        this.layerCache = {};
+      } else {
+        // 开启缓存：缓存当前图层并后台静默预热其它数据集
+        if (this.activeDatasetId && this.waveGeoJsonLayer) {
+          this.layerCache[this.activeDatasetId] = this.waveGeoJsonLayer;
+        }
+        this.preloadNextDataset();
+      }
+    },
+
+    /**
+     * 【设置拐角平滑迭代次数】1次 / 2次 / 3次
+     * @param {number} n 迭代次数 (1, 2, 3)
+     */
+    setSmoothIterations(n) {
+      if (this.smoothIterations === n && this.smoothCurves) return;
+      this.smoothIterations = n;
+      this.smoothCurves = true;
+      this.toggleSmoothCurves();
     },
 
     toggleWaveLayer() {
@@ -910,8 +961,8 @@ export default {
       this.activeDatasetId = targetConfig.id;
       this.uploadedFileName = ""; // 清空上传外部文件标记
 
-      // 1. 优先读取已构建的图层实例缓存（Layer Cache），完全对标 HiFleet 时间轴切帧：0ms 瞬间挂载
-      if (!forceRefresh && this.layerCache[targetConfig.id]) {
+      // 1. 优先读取已构建的图层实例缓存（Layer Cache），完全对标 HiFleet 时间轴切帧：0ms 瞬间挂载（仅在开启缓存模式时有效）
+      if (this.enableCache && !forceRefresh && this.layerCache[targetConfig.id]) {
         const cachedLayer = this.layerCache[targetConfig.id];
         const cachedRaw = this.datasetCache[targetConfig.id];
         this.currentWaveData = cachedRaw;
@@ -928,14 +979,14 @@ export default {
         return;
       }
 
-      // 2. 若命中原始数据缓存（首轮构建图层）
+      // 2. 若命中原始数据缓存（首轮构建图层 / 关闭缓存模式下的实时重算重绘）
       if (!forceRefresh && this.datasetCache[targetConfig.id]) {
         const cachedData = this.datasetCache[targetConfig.id];
         this.currentWaveData = cachedData;
         this.featureCount =
           (cachedData && cachedData.features && cachedData.features.length) || 0;
         this.renderWaveIsoLayer();
-        if (this.waveGeoJsonLayer) {
+        if (this.enableCache && this.waveGeoJsonLayer) {
           this.layerCache[targetConfig.id] = this.waveGeoJsonLayer;
         }
         return;
@@ -958,7 +1009,7 @@ export default {
           this.featureCount =
             (data && data.features && data.features.length) || 0;
           this.renderWaveIsoLayer();
-          if (this.waveGeoJsonLayer) {
+          if (this.enableCache && this.waveGeoJsonLayer) {
             this.layerCache[targetConfig.id] = this.waveGeoJsonLayer;
           }
         }
@@ -971,8 +1022,10 @@ export default {
         }
       } finally {
         this.loadingData = false;
-        // 在浏览器空闲时静默预热构建未激活的数据集图层，确保点击时 0ms 瞬切
-        this.preloadNextDataset();
+        // 在浏览器空闲时静默预热构建未激活的数据集图层，确保点击时 0ms 瞬切（仅在开启缓存时运行）
+        if (this.enableCache) {
+          this.preloadNextDataset();
+        }
       }
     },
 
@@ -980,8 +1033,10 @@ export default {
      * 【空闲后台预热相邻图层】
      * 架构决策：利用浏览器的 requestIdleCallback 在主线程空闲时静默预热构建未激活的数据集图层，
      * 无论数据何时被点击切换，图层均已常驻 layerCache，实现 0.003s（3ms）瞬间切帧。
+     * （仅在开启缓存模式时运行）
      */
     preloadNextDataset() {
+      if (!this.enableCache) return;
       const remaining = this.datasetList.filter(
         (d) => d.id !== this.activeDatasetId && !this.layerCache[d.id]
       );
@@ -1203,6 +1258,45 @@ export default {
   border-radius: 4px;
 }
 
+.section-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.section-header-row .section-title {
+  margin-bottom: 0;
+}
+
+.cache-toggle-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #64748b;
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.15s ease;
+}
+
+.cache-toggle-label input[type="checkbox"] {
+  cursor: pointer;
+  margin: 0;
+  width: 13px;
+  height: 13px;
+  accent-color: #0284c7;
+}
+
+.cache-toggle-label:hover {
+  color: #0284c7;
+}
+
+.cache-toggle-label.active {
+  color: #0284c7;
+  font-weight: 600;
+}
+
 .section-title {
   font-size: 12px;
   font-weight: 600;
@@ -1231,6 +1325,42 @@ export default {
   background: #e0f2fe;
   padding: 2px 6px;
   border-radius: 10px;
+}
+
+/* 平滑迭代次数分段按钮组 (1次/2次/3次) */
+.iter-btn-group {
+  display: inline-flex;
+  align-items: center;
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  border-radius: 5px;
+  padding: 1px;
+  gap: 1px;
+}
+
+.iter-btn {
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 500;
+  border: none;
+  background: transparent;
+  color: #475569;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  line-height: 1.3;
+}
+
+.iter-btn:hover {
+  color: #0284c7;
+  background: rgba(2, 132, 199, 0.08);
+}
+
+.iter-btn.active {
+  background: #0284c7;
+  color: #ffffff;
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(2, 132, 199, 0.35);
 }
 
 .sub-controls {
