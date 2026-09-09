@@ -161,21 +161,24 @@
           <div v-else class="empty-tip">点击或悬浮在地图海浪多边形上查看数值</div>
         </div>
 
-        <!-- 波高图例 -->
-        <div class="section-title" style="margin-top: 8px">波高等级图例 (m)</div>
-        <div class="legend-grid">
-          <div
-            v-for="item in legendList"
-            :key="item.hvalue"
-            class="legend-chip"
-            :style="{ background: item.color, color: getTextColor(item.hvalue) }"
-          >
-            {{ item.hvalue }}m
+        <!-- 波高图例 (紧凑单行水平色标条) -->
+        <div class="section-title" style="margin-top: 6px">波高等级图例 (m)</div>
+        <div class="legend-bar-container">
+          <div class="legend-bar">
+            <div
+              v-for="item in legendList"
+              :key="item.hvalue"
+              class="legend-bar-segment"
+              :style="{ background: item.color, color: getTextColor(item.hvalue) }"
+              :title="`有效波高: ${item.hvalue}m`"
+            >
+              {{ item.hvalue }}
+            </div>
           </div>
         </div>
 
         <!-- 测试数据源切换 -->
-        <div class="section-title" style="margin-top: 10px">测试数据源切换</div>
+        <div class="section-title" style="margin-top: 8px">测试数据源切换</div>
         <div class="dataset-btn-grid">
           <button
             v-for="ds in datasetList"
@@ -191,7 +194,7 @@
         </div>
 
         <!-- 自定义 GeoJSON 数据上传 -->
-        <div class="section-title" style="margin-top: 10px">自定义等值面数据</div>
+        <div class="section-title" style="margin-top: 8px">自定义等值面数据</div>
         <div class="upload-container">
           <input
             type="file"
@@ -1042,8 +1045,8 @@ export default {
 }
 
 .panel-body {
-  padding: 12px;
-  max-height: calc(100vh - 80px);
+  padding: 10px;
+  max-height: calc(100vh - 60px);
   overflow-y: auto;
 }
 
@@ -1052,7 +1055,7 @@ export default {
   background: #f0f9ff;
   border: 1px solid #bae6fd;
   border-radius: 6px;
-  padding: 10px;
+  padding: 8px;
 }
 
 .section-header-highlight {
@@ -1075,8 +1078,8 @@ export default {
 }
 
 .mask-options {
-  margin-top: 8px;
-  padding-top: 8px;
+  margin-top: 6px;
+  padding-top: 6px;
   border-top: 1px dashed #bae6fd;
 }
 
@@ -1098,9 +1101,9 @@ export default {
   font-size: 11px;
   color: #0284c7;
   line-height: 1.35;
-  margin-top: 6px;
+  margin-top: 5px;
   background: rgba(255, 255, 255, 0.6);
-  padding: 4px 6px;
+  padding: 3px 6px;
   border-radius: 4px;
 }
 
@@ -1108,7 +1111,7 @@ export default {
   font-size: 12px;
   font-weight: 600;
   color: #374151;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 .control-row {
@@ -1221,38 +1224,56 @@ input[type="range"] {
   font-style: italic;
 }
 
-/* 图例网格 */
-.legend-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 6px;
+/* 紧凑单行水平连贯色标条（高度仅 20px，极佳节约垂直空间） */
+.legend-bar-container {
+  width: 100%;
 }
 
-.legend-chip {
-  padding: 4px 6px;
+.legend-bar {
+  display: flex;
+  width: 100%;
+  height: 20px;
   border-radius: 4px;
-  font-size: 11px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  border: 1px solid rgba(0, 0, 0, 0.15);
+}
+
+.legend-bar-segment {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
   font-weight: 600;
-  text-align: center;
-  border: 1px solid rgba(0, 0, 0, 0.1);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  cursor: default;
+  transition: transform 0.15s ease, filter 0.15s ease;
+  user-select: none;
+  min-width: 0;
+  padding: 0 1px;
+}
+
+.legend-bar-segment:hover {
+  filter: brightness(1.1);
+  transform: scaleY(1.15);
+  z-index: 2;
 }
 
 /* 测试数据源双按钮切换网格 */
 .dataset-btn-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  margin-top: 4px;
+  gap: 6px;
+  margin-top: 3px;
 }
 
 .dataset-toggle-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
-  padding: 8px 6px;
-  font-size: 12px;
+  gap: 4px;
+  padding: 6px 4px;
+  font-size: 11.5px;
   font-weight: 500;
   border-radius: 6px;
   border: 1px solid #d1d5db;
@@ -1285,18 +1306,18 @@ input[type="range"] {
 }
 
 .dataset-toggle-btn .ds-icon {
-  font-size: 13px;
+  font-size: 12px;
 }
 
 /* 自定义 GeoJSON 上传控制 */
 .upload-container {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   background: #f8fafc;
   border: 1px dashed #cbd5e1;
   border-radius: 6px;
-  padding: 8px;
+  padding: 6px;
 }
 
 .upload-action-btn {
@@ -1305,12 +1326,12 @@ input[type="range"] {
   justify-content: center;
   gap: 6px;
   width: 100%;
-  padding: 8px 12px;
+  padding: 6px 10px;
   background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
   color: #ffffff;
   border: none;
   border-radius: 6px;
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 600;
   cursor: pointer;
   box-shadow: 0 2px 6px rgba(2, 132, 199, 0.25);
