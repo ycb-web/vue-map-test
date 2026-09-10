@@ -272,13 +272,13 @@ export default {
           id: "2026090720",
           name: "数据 2026090720",
           fileName: "wave-fc-2026090720-swh.geojson",
-          featureCount: 1513,
+          featureCount: 468,
         },
         {
           id: "2026090820",
           name: "数据 2026090820",
-          fileName: "wave-fc-2026090820-swh.small.geojson",
-          featureCount: 1500,
+          fileName: "wave-fc-2026090820-swh.geojson",
+          featureCount: 363,
         },
         {
           id: "hifleet-20260908",
