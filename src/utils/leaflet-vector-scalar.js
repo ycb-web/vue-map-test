@@ -3301,7 +3301,11 @@ L.VectorArrowLayer = L.CanvasLayer.extend({
     var speed = Math.sqrt(u * u + v * v);
     if (speed < 0.01) return;
 
-    var angle = Math.atan2(v, -u);
+    // 箭头旋转角计算：
+    // 1. 地理坐标中 u 为向东分量（+X），v 为向北分量（屏幕坐标系 Y 轴向下，故屏幕上向北对应 -v）。
+    // 2. 屏幕瞬时运动向量为 (dx, dy) = (u, -v)。
+    // 3. Canvas 默认箭头绘制方向为 +X 轴（朝右），旋转角 atan2(dy, dx) 即 Math.atan2(-v, u)，指示风流动的物理去向，与粒子运动方向保持一致。
+    var angle = Math.atan2(-v, u);
 
     var len = this.options.arrowSize;
     // 新增：支持动态大小

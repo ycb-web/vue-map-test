@@ -11,6 +11,7 @@ import LeaderLinePage from "../views/LeaderLinePage";
 import TriangleTopicPage from "../views/TriangleTopicPage";
 import BuildingFloodDemoPage from "../views/BuildingFloodDemoPage.vue";
 import LabPage from "../views/LabPage";
+import DayaBayFlowPage from "../views/DayaBayFlowPage";
 
 Vue.use(VueRouter);
 
@@ -18,6 +19,15 @@ const routes = [
   {
     path: "/",
     redirect: "/wave",
+  },
+  {
+    path: "/dayabay-flow",
+    name: "DayaBayFlow",
+    component: DayaBayFlowPage,
+    meta: {
+      title: "大亚湾流场 - Vue地图可视化工具",
+      description: "大亚湾海流图片还原与原始数据流场播放对比",
+    },
   },
   {
     path: "/triangle-topic",
