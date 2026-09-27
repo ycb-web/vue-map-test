@@ -1,16 +1,41 @@
 import L from "leaflet";
 
 /**
- * 流速颜色映射表（流体力学标准冷暖渐变）
+ * 深圳预报室水动力流速标准色阶定义（用户指定标准图例）
+ * 刻度涵盖 0 到 0.41 m/s：
+ * 0: 深蓝 (#20228b)
+ * 0.06: 宝蓝 (#1e32f3)
+ * 0.12: 天蓝 (#24b4f2)
+ * 0.17: 青绿 (#42f4ca)
+ * 0.23: 黄绿 (#c5f250)
+ * 0.29: 橙黄 (#f4ab27)
+ * 0.35: 鲜红 (#f22e24)
+ * 0.41: 暗红 (#8a2221)
  */
-function getVelocityColor(speed, maxSpeed = 1.5) {
-  const t = Math.min(1, Math.max(0, speed / maxSpeed));
-  if (t < 0.2) return "#40a9ff"; // 浅蓝
-  if (t < 0.4) return "#36cfc9"; // 青绿
-  if (t < 0.6) return "#52c41a"; // 翠绿
-  if (t < 0.8) return "#fadb14"; // 亮黄
-  if (t < 0.95) return "#fa8c16"; // 亮橙
-  return "#f5222d"; // 绯红
+export const VELOCITY_COLOR_STOPS = [
+  { value: 0, label: "0", color: "#20228b" },
+  { value: 0.06, label: "0.06", color: "#2338f1" },
+  { value: 0.12, label: "0.12", color: "#26b5f5" },
+  { value: 0.17, label: "0.17", color: "#47f1ca" },
+  { value: 0.23, label: "0.23", color: "#c7f552" },
+  { value: 0.29, label: "0.29", color: "#f3ab27" },
+  { value: 0.35, label: "0.35", color: "#f23129" },
+  { value: 0.41, label: "0.41", color: "#8a2221" },
+];
+
+/**
+ * 按照用户指定的 8 阶流速精准色阶进行颜色映射
+ * @param {number} speed 流速 (m/s)
+ */
+export function getVelocityColor(speed) {
+  if (speed <= 0.03) return "#20228b";
+  if (speed <= 0.09) return "#2338f1";
+  if (speed <= 0.145) return "#26b5f5";
+  if (speed <= 0.20) return "#47f1ca";
+  if (speed <= 0.26) return "#c7f552";
+  if (speed <= 0.32) return "#f3ab27";
+  if (speed <= 0.38) return "#f23129";
+  return "#8a2221";
 }
 
 /**
@@ -30,10 +55,12 @@ export const RawGridArrowLayer = L.CanvasLayer.extend({
     pane: "flowTopPane", // 顶层流场 Pane (zIndex 550)，确保置于最上方不被陆地图包遮挡
     showGrid: true, // 是否绘制物理网格线
     showArrows: true, // 是否绘制矢量箭头
+    showValues: true, // 是否叠加展示格点流速数值 (m/s)
     showCellFill: false, // 是否填充单元格流速底色
     gridColor: "rgba(0, 220, 255, 0.45)", // 网格线颜色
     gridLineWidth: 1, // 网格线宽
     arrowColor: "#00ff3f", // 默认箭头颜色
+    valueColor: "#ffffff", // 默认数值文字颜色
     useVelocityColor: true, // 按照真实流速大小着色
     maxVelocity: 1.5, // 标定最大参考流速 (m/s)
     arrowSizeRatio: 0.75, // 箭头长度相对于格点像素宽度的比例
@@ -225,11 +252,15 @@ export const RawGridArrowLayer = L.CanvasLayer.extend({
         Math.min(this.options.maxArrowLen, cellW * this.options.arrowSizeRatio)
       );
 
-      for (let y = yMin; y <= yMax; y++) {
+      // 自适应步长保护：当视野较广、格点在屏幕上过密（如 cellW < 12px）时，按屏幕像素自适应步进，避免海量网格箭头堆叠导致浏览器阻塞
+      const arrowStepX = cellW < 12 ? Math.max(1, Math.ceil(12 / Math.max(cellW, 0.5))) : 1;
+      const arrowStepY = cellW < 12 ? Math.max(1, Math.ceil(12 / Math.max(cellW, 0.5))) : 1;
+
+      for (let y = yMin; y <= yMax; y += arrowStepY) {
         const rowOffset = y * nx;
         const ptLat = la1 - y * absDy;
 
-        for (let x = xMin; x <= xMax; x++) {
+        for (let x = xMin; x <= xMax; x += arrowStepX) {
           const idx = rowOffset + x;
           const u = uData[idx];
           const v = vData[idx];
@@ -264,6 +295,70 @@ export const RawGridArrowLayer = L.CanvasLayer.extend({
             : this.options.arrowColor;
 
           this._drawSingleArrow(ctx, pt.x, pt.y, rad, len, color, cellW);
+        }
+      }
+
+      ctx.restore();
+    }
+
+    // -------------------------------------------------------------
+    // C. 绘制原始物理格点流速数值 (m/s)
+    // -------------------------------------------------------------
+    if (this.options.showValues && cellW >= 8) {
+      ctx.save();
+
+      // 自适应字号与防挤压采样步长 (字号在 9~13px 之间平滑适配)
+      const fontSize = Math.min(13, Math.max(9, Math.round(cellW * 0.28)));
+      ctx.font = `600 ${fontSize}px "SF Pro Display", -apple-system, "Roboto Mono", monospace`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+
+      // 计算防重叠步长：若当前网格像素过密（如 cellW < 32px），自动隔格采样展示
+      const minLabelDist = 32;
+      const stepX = Math.max(1, Math.ceil(minLabelDist / cellW));
+      const stepY = Math.max(1, Math.ceil(18 / cellW));
+
+      // 偏移距离：若开启箭头，文字下移避开箭头主干；若未开启箭头，文字居中
+      const offsetY = this.options.showArrows ? Math.max(8, Math.min(16, cellW * 0.35)) : 0;
+
+      for (let y = yMin; y <= yMax; y += stepY) {
+        const rowOffset = y * nx;
+        const ptLat = la1 - y * absDy;
+
+        for (let x = xMin; x <= xMax; x += stepX) {
+          const idx = rowOffset + x;
+          const u = uData[idx];
+          const v = vData[idx];
+
+          if (u === null || v === null || isNaN(u) || isNaN(v)) {
+            continue;
+          }
+
+          const speed = Math.sqrt(u * u + v * v);
+          if (speed < 0.005) continue; // 忽略静止水体，避免满屏 0.00 杂乱
+
+          const ptLng = lo1 + x * dx;
+          const pt = map.latLngToContainerPoint([ptLat, ptLng]);
+
+          if (pt.x < -20 || pt.x > canvas.width + 20 || pt.y < -20 || pt.y > canvas.height + 20) {
+            continue;
+          }
+
+          const text = speed.toFixed(2);
+          const drawY = pt.y + offsetY;
+
+          // 1. 黑色高对比度描边（2.5px），保证在任何底图上黑底亮字，绝不模糊
+          ctx.strokeStyle = "rgba(0, 0, 0, 0.9)";
+          ctx.lineWidth = 2.5;
+          ctx.lineJoin = "round";
+          ctx.strokeText(text, pt.x, drawY);
+
+          // 2. 文本实体（按照流速标准色着色）
+          const textColor = this.options.useVelocityColor
+            ? getVelocityColor(speed, this.options.maxVelocity)
+            : this.options.valueColor;
+          ctx.fillStyle = textColor;
+          ctx.fillText(text, pt.x, drawY);
         }
       }
 

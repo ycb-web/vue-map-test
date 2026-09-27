@@ -12,13 +12,23 @@ import TriangleTopicPage from "../views/TriangleTopicPage";
 import BuildingFloodDemoPage from "../views/BuildingFloodDemoPage.vue";
 import LabPage from "../views/LabPage";
 import DayaBayFlowPage from "../views/DayaBayFlowPage";
+import RadarPage from "../views/RadarPage";
 
 Vue.use(VueRouter);
 
 const routes = [
   {
     path: "/",
-    redirect: "/wave",
+    redirect: "/radar",
+  },
+  {
+    path: "/radar",
+    name: "Radar",
+    component: RadarPage,
+    meta: {
+      title: "天气雷达 - Vue地图可视化工具",
+      description: "全球天气雷达实时强度图层叠加与分析",
+    },
   },
   {
     path: "/dayabay-flow",
@@ -27,6 +37,15 @@ const routes = [
     meta: {
       title: "大亚湾流场 - Vue地图可视化工具",
       description: "大亚湾海流图片还原与原始数据流场播放对比",
+    },
+  },
+  {
+    path: "/adaptive-flow",
+    name: "AdaptiveFlow",
+    component: () => import("../views/AdaptiveFlowPage/index.vue"),
+    meta: {
+      title: "自适应多尺度流场 - Vue地图可视化工具",
+      description: "南海宏观大区域与大亚湾微观超精细自适应流场无缝切换",
     },
   },
   {

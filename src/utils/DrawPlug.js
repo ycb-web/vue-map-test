@@ -195,10 +195,19 @@ class DrawPlug {
         that.map.off("mousedown", onClick);
         that.map.off("mousemove", onMove);
         that.map.off("dblclick", onDoubleClick);
+        that._currentOnClick = null;
+        that._currentOnMove = null;
+        that._currentOnDblClick = null;
+        if (typeof that.onFinish === "function") {
+          that.onFinish({ type: "distance", distance });
+        }
       }
     }
 
-    // 绑定事件
+    // 记录并绑定事件
+    that._currentOnClick = onClick;
+    that._currentOnMove = onMove;
+    that._currentOnDblClick = onDoubleClick;
     that.map.on("mousedown", onClick);
     that.map.on("dblclick", onDoubleClick);
   }
@@ -326,12 +335,20 @@ class DrawPlug {
         that.map.off("mousedown", onClick);
         that.map.off("mousemove", onMove);
         that.map.off("dblclick", onDoubleClick);
+        that._currentOnClick = null;
+        that._currentOnMove = null;
+        that._currentOnDblClick = null;
+        if (typeof that.onFinish === "function") {
+          that.onFinish({ type: "area", area });
+        }
       }
     }
 
-    // 绑定事件
+    // 记录并绑定事件
+    that._currentOnClick = onClick;
+    that._currentOnMove = onMove;
+    that._currentOnDblClick = onDoubleClick;
     that.map.on("mousedown", onClick);
-    that.map.on("mousemove", onMove);
     that.map.on("dblclick", onDoubleClick);
   }
 
@@ -347,12 +364,23 @@ class DrawPlug {
     this.DRAWPOLYGONPOINTS = [];
     this.DRAWING = false;
     this.MEASURERESULT = 0;
-    this.map.getContainer().style.cursor = "";
+    if (this.map && this.map.getContainer()) {
+      this.map.getContainer().style.cursor = "";
+    }
 
-    // 移除所有事件监听
-    this.map.off("mousedown");
-    this.map.off("mousemove");
-    this.map.off("dblclick");
+    // 仅针对性移除当前测量绑定的监听器，绝不误伤外部组件的全局 mousemove
+    if (this._currentOnClick) {
+      this.map.off("mousedown", this._currentOnClick);
+      this._currentOnClick = null;
+    }
+    if (this._currentOnMove) {
+      this.map.off("mousemove", this._currentOnMove);
+      this._currentOnMove = null;
+    }
+    if (this._currentOnDblClick) {
+      this.map.off("dblclick", this._currentOnDblClick);
+      this._currentOnDblClick = null;
+    }
   }
 
   /**

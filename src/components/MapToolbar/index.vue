@@ -386,11 +386,14 @@ export default {
       // 添加标注图层（如果有）
       if (basemap.labelUrl) {
         var hasLabelsPane = this.map.getPane && this.map.getPane("labelsPane");
-        this.labelLayer = L.tileLayer(basemap.labelUrl, {
+        var labelOptions = {
           transparent: true,
           maxZoom: 18,
-          pane: hasLabelsPane ? "labelsPane" : undefined,
-        });
+        };
+        if (hasLabelsPane) {
+          labelOptions.pane = "labelsPane";
+        }
+        this.labelLayer = L.tileLayer(basemap.labelUrl, labelOptions);
         this.labelLayer.addTo(this.map);
         if (!hasLabelsPane) {
           this.labelLayer.setZIndex(1);
@@ -509,11 +512,14 @@ export default {
       // 添加新的标注图层（如果有）
       if (basemap.labelUrl) {
         var hasLabelsPane = this.map.getPane && this.map.getPane("labelsPane");
-        this.labelLayer = L.tileLayer(basemap.labelUrl, {
+        var labelOptions = {
           transparent: true,
           maxZoom: 18,
-          pane: hasLabelsPane ? "labelsPane" : undefined,
-        });
+        };
+        if (hasLabelsPane) {
+          labelOptions.pane = "labelsPane";
+        }
+        this.labelLayer = L.tileLayer(basemap.labelUrl, labelOptions);
         this.labelLayer.addTo(this.map);
         if (!hasLabelsPane) {
           this.labelLayer.setZIndex(1);
