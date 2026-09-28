@@ -649,6 +649,7 @@ L.RadarTileLayer = (L.GridLayer ? L.GridLayer : L.Class).extend({
         if (!dbzImg || dbzImg.naturalWidth <= 1) {
           // 晴空无雨切片 (1x1 占位图)，需将该切片区域在主网格中清零 (0 dBZ)
           this._clearTileData(x, y);
+          this._isLoaded = true;
           this.fire("tile-loaded", {
             x,
             y,

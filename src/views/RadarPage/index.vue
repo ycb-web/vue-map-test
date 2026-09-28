@@ -305,7 +305,10 @@
         <div class="section-title">辅助参考图层</div>
 
         <div class="control-group switch-row">
-          <span class="control-label">网格与格点数值</span>
+          <div class="control-label-group">
+            <span class="control-label">网格与格点数值</span>
+            <span class="grid-res-tag" v-if="debugParams.showDataGrid">({{ currentGridTypeLabel }})</span>
+          </div>
           <label class="switch-toggle">
             <input
               type="checkbox"
@@ -576,6 +579,19 @@ export default {
         return "全球 6km 切片 (Z5-9)";
       }
       return `${this.currentModeRegionName} 2km (独占)`;
+    },
+
+    currentGridTypeLabel() {
+      if (this.currentMode !== "auto") {
+        return `${this.currentModeRegionName} 2km`;
+      }
+      if (this.currentMode === "global") {
+        return "全球 6km";
+      }
+      if (this.mapZoom >= 10 && this.currentActiveRegion) {
+        return `${this.currentActiveRegion.name} 2km + 全球 6km`;
+      }
+      return "全球 6km";
     },
 
     activeTilesSummary() {
@@ -998,8 +1014,16 @@ export default {
           }
           this.woradLayer.redraw();
         }
+        // 恢复 2km 区域切片图层的默认层级门槛 (zoom > 9，即 10+ 激活)
+        Object.values(this.regionalLayers).forEach((layer) => {
+          if (layer) {
+            layer.options.minZoom = 10;
+            layer.options.minRegionalZoom = 9;
+          }
+        });
         this.ensureAllRegionalLayersLoaded();
         this.updateActiveRegions();
+        this.requestRenderGridData();
       } else if (mode === "global") {
         // 全球模式：底图解开层级限制覆盖全级别 (maxZoom: 18)，暂停局域精细切片 (关闭避让，全境显示 6km)
         if (this.woradLayer) {
@@ -1021,17 +1045,25 @@ export default {
             easeLinearity: 0.25,
           });
         }
+        this.requestRenderGridData();
       } else {
-        // 定向大区模式 (东亚/欧洲/北美)：彻底关闭全球底图，只看目标大区精细化数据！
+        // 定向大区模式 (东亚/欧洲/北美)：彻底关闭全球底图，100% 独占呈现目标大区 2km 数据！
         if (this.woradLayer && this.map && this.map.hasLayer(this.woradLayer)) {
           this.map.removeLayer(this.woradLayer);
         }
         Object.keys(this.regionalLayers).forEach((key) => {
           const layer = this.regionalLayers[key];
           if (key === mode) {
+            // 解开大区定向模式的层级限制，允许从 zoom 2 到 18 全程查看该大区的 2km 数据
+            layer.options.minZoom = 2;
+            layer.options.minRegionalZoom = 0;
             if (layer && this.map && !this.map.hasLayer(layer)) {
               layer.addTo(this.map);
             }
+            if (layer._updateViewportTiles) {
+              layer._updateViewportTiles();
+            }
+            layer.redraw();
           } else {
             if (layer && this.map && this.map.hasLayer(layer)) {
               this.map.removeLayer(layer);
@@ -1047,6 +1079,7 @@ export default {
           });
         }
         this.updateActiveRegions();
+        this.requestRenderGridData();
       }
     },
 
@@ -1107,7 +1140,7 @@ export default {
       } else if (this.currentMode !== "auto") {
         // 定向大区模式：严格仅从当前选定大区的 2km 矩阵拾取，绝不回退全球底图！
         const currentTargetLayer = this.regionalLayers[this.currentMode];
-        if (this.mapZoom >= 10 && currentTargetLayer && currentTargetLayer._isLoaded) {
+        if (currentTargetLayer && (currentTargetLayer._isLoaded || currentTargetLayer._rawGrid)) {
           res = currentTargetLayer.getValueAt(e.latlng.lat, e.latlng.lng);
         }
       } else {
@@ -1439,51 +1472,95 @@ export default {
       const vSouth = bounds.getSouth();
       const vNorth = bounds.getNorth();
 
-      // 收集当前视口需要绘制的目标网格 (2km 优先，6km 托底)
+      // 收集当前视口需要绘制的目标网格
+      // 核心物理准则：数据是 6km 就是 6km 网格，数据是 2km 就是 2km 网格，100% 数据驱动，步长与物理像元绝对一致！
       const tasks = [];
+      const isAuto = this.currentMode === "auto";
+      const isRegionalMode = ["earad", "eurad", "usrad"].includes(this.currentMode);
+      const active2kmTasks = [];
 
-      // 1. 当 zoom >= 10 时，检测视口相交的 2km 区域 (如东亚 earad, 欧洲 eurad, 北美 usrad)
-      if (zoom >= 10) {
-        for (const r of this.regionalList) {
+      // 1. 判定 2km 大区网格任务：
+      // - 若处于定向大区模式 (earad/eurad/usrad)：目标大区锁定激活（全层级使用 2km 数据与 2km 网格）
+      // - 若处于自动自适应模式 (auto)：缩放层级 zoom >= 10 且视口与 2km 区域相交时激活
+      if (isRegionalMode) {
+        const r = this.regionalList.find((item) => item.id === this.currentMode);
+        if (r) {
           const b = r.bounds;
           if (vWest < b.east && vEast > b.west && vSouth < b.north && vNorth > b.south) {
             const layer = this.regionalLayers[r.id];
-            if (layer && layer._isLoaded && layer._rawGrid) {
-              tasks.push({
+            if (layer && layer._rawGrid && layer._gridWidth > 0) {
+              const dx = (b.east - b.west) / (layer._gridWidth - 1);
+              const dy = (b.north - b.south) / (layer._gridHeight - 1);
+              const taskObj = {
                 id: r.id,
                 name: r.name,
                 is2km: true,
                 bounds: b,
                 w: layer._gridWidth,
                 h: layer._gridHeight,
+                dx,
+                dy,
                 rawGrid: layer._rawGrid,
-              });
+              };
+              tasks.push(taskObj);
+              active2kmTasks.push(taskObj);
+            }
+          }
+        }
+      } else if (isAuto && zoom >= 10) {
+        for (const r of this.regionalList) {
+          const b = r.bounds;
+          if (vWest < b.east && vEast > b.west && vSouth < b.north && vNorth > b.south) {
+            const layer = this.regionalLayers[r.id];
+            if (layer && layer._rawGrid && layer._gridWidth > 0) {
+              const dx = (b.east - b.west) / (layer._gridWidth - 1);
+              const dy = (b.north - b.south) / (layer._gridHeight - 1);
+              const taskObj = {
+                id: r.id,
+                name: r.name,
+                is2km: true,
+                bounds: b,
+                w: layer._gridWidth,
+                h: layer._gridHeight,
+                dx,
+                dy,
+                rawGrid: layer._rawGrid,
+              };
+              tasks.push(taskObj);
+              active2kmTasks.push(taskObj);
             }
           }
         }
       }
 
-      // 2. 全球 6km 底图 (worad_hres)：当无 2km 区域高精网格活跃时渲染，确保 6km 与 2km 网格绝对不重叠冲突
-      if (tasks.length === 0 && this.woradLayer && this.woradLayer._isLoaded && this.woradLayer._rawGrid) {
+      // 2. 判定全球 6km 底图网格任务 (worad_hres)：
+      // - 若处于定向大区模式：底图被移除，绝不画 6km 网格！
+      // - 若处于纯全球模式或自动自适应模式：只要 woradLayer 就绪即推入 6km 任务
+      //   (在自动模式 zoom >= 10 存在 2km 区域时，通过 Canvas 裁剪自动避让 2km 区域，实现 2km 区域画 2km 网格，外围全画 6km 网格)
+      if (!isRegionalMode && this.woradLayer && this.woradLayer._rawGrid && this.woradLayer._gridWidth > 0) {
+        const b = { west: -180, east: 180, south: -90, north: 90 };
+        const w = this.woradLayer._gridWidth;
+        const h = this.woradLayer._gridHeight;
+        const dx = 360 / (w - 1);
+        const dy = 180 / (h - 1);
         tasks.push({
           id: "worad_hres",
           name: "全球",
           is2km: false,
-          bounds: { west: -180, east: 180, south: -90, north: 90 },
-          w: this.woradLayer._gridWidth,
-          h: this.woradLayer._gridHeight,
+          bounds: b,
+          w,
+          h,
+          dx,
+          dy,
           rawGrid: this.woradLayer._rawGrid,
+          cutoutRegions: active2kmTasks, // 传入需要剔除/避让的 2km 区域
         });
       }
 
       if (tasks.length === 0) return;
 
       for (const task of tasks) {
-        const { bounds: gBounds, w, h, rawGrid, is2km } = task;
-        const lonSpan = gBounds.east - gBounds.west;
-        const latSpan = gBounds.north - gBounds.south;
-        const dx = lonSpan / (w - 1);
-        const dy = latSpan / (h - 1);
+        const { bounds: gBounds, w, h, dx, dy, rawGrid, is2km, cutoutRegions } = task;
 
         // 计算屏幕上单格像素宽高
         const centerLat = Math.max(-80, Math.min(80, bounds.getCenter().lat));
@@ -1515,6 +1592,30 @@ export default {
         }
         xLines[colCount] = map.latLngToContainerPoint([centerLat, gBounds.west + (maxI + 0.5) * dx]).x;
 
+        // 若需要剔除 2km 区域（6km 底图避让 2km 大区），利用 Canvas evenodd 裁剪
+        const hasCutout = !is2km && cutoutRegions && cutoutRegions.length > 0;
+        if (hasCutout) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(0, 0, width, height);
+          for (const cr of cutoutRegions) {
+            const pNW = map.latLngToContainerPoint([
+              cr.bounds.north + 0.5 * cr.dy,
+              cr.bounds.west - 0.5 * cr.dx,
+            ]);
+            const pSE = map.latLngToContainerPoint([
+              cr.bounds.south - 0.5 * cr.dy,
+              cr.bounds.east + 0.5 * cr.dx,
+            ]);
+            const rx = Math.min(pNW.x, pSE.x);
+            const ry = Math.min(pNW.y, pSE.y);
+            const rw = Math.abs(pSE.x - pNW.x);
+            const rh = Math.abs(pSE.y - pNW.y);
+            ctx.rect(rx, ry, rw, rh);
+          }
+          ctx.clip("evenodd");
+        }
+
         // 1. 批量绘制物理网格线 (逐格连续绘制，无论缩放多小，忠实展现真实密集原始物理线框)
         ctx.beginPath();
         ctx.lineWidth = is2km ? 1.0 : 0.75;
@@ -1527,7 +1628,7 @@ export default {
           ctx.strokeStyle = is2km ? "rgba(56, 189, 248, 0.45)" : "rgba(148, 163, 184, 0.35)";
         }
 
-        // 水平纬线的左右绘制端点 (限制在大区地理有效边界内并延展半格)
+        // 水平纬线的左右绘制端点 (限制在地理有效边界内并延展半格)
         const xStart = Math.max(-10, Math.min(width + 10, map.latLngToContainerPoint([centerLat, gBounds.west - 0.5 * dx]).x));
         const xEnd = Math.max(-10, Math.min(width + 10, map.latLngToContainerPoint([centerLat, gBounds.east + 0.5 * dx]).x));
 
@@ -1587,8 +1688,8 @@ export default {
           const rowOffset = j * w;
 
           for (let i = minI; i <= maxI; i++) {
-            // 若该点属于 6km 底图，但落在 2km 活跃区域内，跳过 6km 数值（避免重叠双显）
-            if (!is2km && zoom >= 10) {
+            // 若启用了 2km 裁剪避让，快速跳过落在 2km 区域内的点
+            if (hasCutout) {
               const lonCenter = gBounds.west + i * dx;
               if (isPointInHighResRegion(latCenter, lonCenter)) {
                 continue;
@@ -1619,9 +1720,8 @@ export default {
           }
         }
 
-        // 2km 区域高精网格已绘制，无需再绘制后续图层
-        if (is2km) {
-          break;
+        if (hasCutout) {
+          ctx.restore();
         }
       }
     },
@@ -2503,6 +2603,19 @@ export default {
   font-size: 10px;
   color: #64748b;
   line-height: 1.3;
+}
+
+.control-label-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.grid-res-tag {
+  font-size: 11px;
+  color: #38bdf8;
+  font-weight: 600;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 
 .switch-row {
