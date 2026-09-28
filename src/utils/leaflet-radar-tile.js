@@ -150,7 +150,7 @@ export const REGIONAL_RADAR_CONFIGS = {
     bounds: { west: 102, east: 147, south: 19, north: 46 },
     center: [31.5, 117.5],
     zoom: 5,
-    minRegionalZoom: 9, // 当 zoom > 9 (即 10+) 时自动激活拉取 2km 切片
+    minRegionalZoom: 4, // 当 zoom > 4 (即 5+) 时自动激活拉取 2km 切片
   },
   eurad: {
     model: "eurad",
@@ -164,7 +164,7 @@ export const REGIONAL_RADAR_CONFIGS = {
     bounds: { west: -23.488, east: 45.012, south: 29.488, north: 70.488 },
     center: [50.0, 10.0],
     zoom: 5,
-    minRegionalZoom: 9,
+    minRegionalZoom: 4,
   },
   usrad: {
     model: "usrad",
@@ -178,13 +178,13 @@ export const REGIONAL_RADAR_CONFIGS = {
     bounds: { west: -134.079, east: -60.8811, south: 21.12324, north: 52.60614 },
     center: [38.5, -96.5],
     zoom: 5,
-    minRegionalZoom: 9,
+    minRegionalZoom: 4,
   },
 };
 
 /**
  * Ventusky 官方 2km 超高精大区地理边界 (东亚、欧洲、北美)
- * 用于在中高缩放层级 (Zoom >= 10) 自动避让全球 6km 底图，杜绝双图层重叠叠加重影
+ * 用于在缩放层级 (Zoom >= 5) 自动避让全球 6km 底图，杜绝双图层重叠叠加重影
  */
 export const HIGH_RES_REGIONS = [
   { model: "earad", bounds: { west: 102, east: 147, south: 19, north: 46 } },
@@ -239,9 +239,9 @@ L.RadarTileLayer = (L.GridLayer ? L.GridLayer : L.Class).extend({
     rainOnly: false, // 默认全相态协同融合（普通降雨、雷暴强对流、降雪全量叠加）
     colorScale: VENTUSKY_RADAR_COLORS,
     minDbzThreshold: 0, // 过滤阈值默认为 0，全显雷达回波面场
-    minRegionalZoom: 9, // 区域精细化切片触发阈值：仅当 zoom > 9 (即 10+) 时才激活 2km 局域切片，<= 9 保持宏观与 6km 视野
-    maskRegionalBounds: true, // 全球 6km 底图在高精层级是否自动避让 2km 大区地理范围（杜绝两层叠加重影）
-    highResMaskZoom: 9, // 当 zoom > 9 (即 10+) 且处于 2km 区域时激活避让，交由 2km 图层独占渲染
+    minRegionalZoom: 4, // 区域精细化切片触发阈值：仅当 zoom > 4 (即 5+) 时才激活 2km 局域切片，1-4 保持全球宏观视野
+    maskRegionalBounds: true, // 全球 6km 底图在精细层级是否自动避让 2km 大区地理范围（杜绝两层叠加重影）
+    highResMaskZoom: 4, // 当 zoom > 4 (即 5+) 且处于 2km 区域时激活避让，交由 2km 图层独占渲染
   },
 
   onAdd(map) {
@@ -505,7 +505,7 @@ L.RadarTileLayer = (L.GridLayer ? L.GridLayer : L.Class).extend({
     const minZoom =
       typeof this.options.minRegionalZoom === "number"
         ? this.options.minRegionalZoom
-        : (this._regionalConfig.minRegionalZoom != null ? this._regionalConfig.minRegionalZoom : 9);
+        : (this._regionalConfig.minRegionalZoom != null ? this._regionalConfig.minRegionalZoom : 4);
 
     const mapBounds = map.getBounds();
     const vWest = mapBounds.getWest();
@@ -1018,7 +1018,7 @@ L.RadarTileLayer = (L.GridLayer ? L.GridLayer : L.Class).extend({
       const minZoom =
         typeof this.options.minRegionalZoom === "number"
           ? this.options.minRegionalZoom
-          : (this._regionalConfig.minRegionalZoom != null ? this._regionalConfig.minRegionalZoom : 9);
+          : (this._regionalConfig.minRegionalZoom != null ? this._regionalConfig.minRegionalZoom : 4);
       if (coords.z <= minZoom) {
         ctx.clearRect(0, 0, size, size);
         return;
@@ -1050,9 +1050,9 @@ L.RadarTileLayer = (L.GridLayer ? L.GridLayer : L.Class).extend({
     const n = Math.pow(2, coords.z);
     const isWorad = this._regionalConfig && this._regionalConfig.model === "worad_hres";
     const maskRegional = isWorad && this.options.maskRegionalBounds !== false;
-    const maskZoom = typeof this.options.highResMaskZoom === "number" ? this.options.highResMaskZoom : 9;
+    const maskZoom = typeof this.options.highResMaskZoom === "number" ? this.options.highResMaskZoom : 4;
 
-    // 当全球 6km 底图处于高精层级 (z > 9，即 10+) 且启用了高精避让时：
+    // 当全球 6km 底图处于精细层级 (z > 4，即 5+) 且启用了高精避让时：
     // 若当前瓦片整块完全落在 2km 高精大区 (如东亚、欧洲、北美) 内部，直接清空并跳过渲染，避免与 2km 图层重叠！
     if (maskRegional && coords.z > maskZoom) {
       const tileNorthRad = Math.atan(Math.sinh(Math.PI * (1 - (2 * coords.y) / n)));
@@ -1174,7 +1174,7 @@ L.RadarTileLayer = (L.GridLayer ? L.GridLayer : L.Class).extend({
       const minZoom =
         typeof this.options.minRegionalZoom === "number"
           ? this.options.minRegionalZoom
-          : (this._regionalConfig.minRegionalZoom != null ? this._regionalConfig.minRegionalZoom : 9);
+          : (this._regionalConfig.minRegionalZoom != null ? this._regionalConfig.minRegionalZoom : 4);
       if (this._map.getZoom() <= minZoom) {
         return null;
       }
@@ -1197,7 +1197,7 @@ L.RadarTileLayer = (L.GridLayer ? L.GridLayer : L.Class).extend({
     // 全球底图在高精大区内避让取值 (交由 2km 精细图层取值)
     const isWorad = this._regionalConfig && this._regionalConfig.model === "worad_hres";
     const maskRegional = isWorad && this.options.maskRegionalBounds !== false;
-    const maskZoom = typeof this.options.highResMaskZoom === "number" ? this.options.highResMaskZoom : 9;
+    const maskZoom = typeof this.options.highResMaskZoom === "number" ? this.options.highResMaskZoom : 4;
     if (maskRegional && this._map && this._map.getZoom() > maskZoom && isPointInHighResRegion(lat, normLon)) {
       return null;
     }

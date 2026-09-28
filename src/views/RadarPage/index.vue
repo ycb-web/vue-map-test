@@ -145,13 +145,13 @@
               class="strategy-btn full-width"
               :class="{ active: currentMode === 'auto' }"
               @click="switchMode('auto')"
-              title="智能自适应模式：自动根据 Zoom 与视口拉取对应数据 (0-4全球底图，5-9全球6km切片，10+精细2km切片)"
+              title="智能自适应模式：自动根据 Zoom 与视口拉取对应数据 (1-4 全球底图，5+ 6km+2km 协同切片)"
             >
               <div class="strategy-left">
                 <span class="strategy-icon">🤖</span>
                 <div class="strategy-info">
                   <span class="strategy-title">全域自适应联动</span>
-                  <span class="strategy-desc">0-4 底图 / 5-9 6km / 10+ 2km</span>
+                  <span class="strategy-desc">1-4 全球底图 / 5+ 6km+2km</span>
                 </div>
               </div>
               <span class="strategy-tag" :class="{ 'tag-active': currentMode === 'auto' }">
@@ -214,14 +214,14 @@
               <span class="meta-val highlight">{{ activeTilesSummary }}</span>
             </div>
           </div>
-          <!-- 多尺度阶梯指示器 (3 行分级体系，当前 Zoom 对应行动态高亮) -->
+          <!-- 多尺度阶梯指示器 (两级分级体系，当前 Zoom 对应行动态高亮) -->
           <div class="zoom-tier-list">
-            <!-- 第 1 行: 1 - 4 全球底图 -->
+            <!-- 第 1 行: 1 - 4 全球宏观底图 -->
             <div
               class="zoom-tier-row"
               :class="{ 'is-active': mapZoom < 5 }"
-              @click="setZoomLevel(2)"
-              title="点击切换至 Z2 全球宏观底图视野"
+              @click="setZoomLevel(3)"
+              title="点击切换至 Z3 全球宏观底图视野"
             >
               <div class="tier-badge">1 - 4</div>
               <div class="tier-info">
@@ -236,40 +236,20 @@
               </div>
             </div>
 
-            <!-- 第 2 行: 5 - 9 全球 6km 切片 -->
+            <!-- 第 2 行: 5+ 6km + 2km 协同切片 -->
             <div
               class="zoom-tier-row"
-              :class="{ 'is-active': mapZoom >= 5 && mapZoom <= 9 }"
+              :class="{ 'is-active': mapZoom >= 5 }"
               @click="setZoomLevel(6)"
-              title="点击切换至 Z6 全球 6km 切片视野"
+              title="点击切换至 Z6 6km+2km 协同精细切片视野"
             >
-              <div class="tier-badge">5 - 9</div>
+              <div class="tier-badge">5+</div>
               <div class="tier-info">
-                <div class="tier-name">全球 6km 高清切片</div>
-                <div class="tier-sub">18×11 矩阵 · 全域同源漫游</div>
+                <div class="tier-name">6km + 2km 协同切片</div>
+                <div class="tier-sub">大区 2km 超清 + 全球 6km 避让托底</div>
               </div>
               <div class="tier-status">
-                <span v-if="mapZoom >= 5 && mapZoom <= 9" class="tier-active-badge">
-                  <span class="tier-dot"></span>Z{{ mapZoom }} 当前
-                </span>
-                <span v-else class="tier-jump-badge">缩放</span>
-              </div>
-            </div>
-
-            <!-- 第 3 行: 10+ 2km 精细超清切片 -->
-            <div
-              class="zoom-tier-row"
-              :class="{ 'is-active': mapZoom >= 10 }"
-              @click="setZoomLevel(10)"
-              title="点击切换至 Z10 2km 超清精细切片视野"
-            >
-              <div class="tier-badge">10+</div>
-              <div class="tier-info">
-                <div class="tier-name">2km 超清 + 6km 避让</div>
-                <div class="tier-sub">三大区独占 · 空间无重影</div>
-              </div>
-              <div class="tier-status">
-                <span v-if="mapZoom >= 10" class="tier-active-badge">
+                <span v-if="mapZoom >= 5" class="tier-active-badge">
                   <span class="tier-dot"></span>Z{{ mapZoom }} 当前
                 </span>
                 <span v-else class="tier-jump-badge">缩放</span>
@@ -398,7 +378,7 @@
           <span class="hud-val hud-placeholder" v-else>光标移入拾取坐标</span>
         </div>
         <div class="hud-item hud-zoom">
-          <span class="hud-val zoom-highlight" :class="{ 'zoom-regional': mapZoom >= 10 }">
+          <span class="hud-val zoom-highlight" :class="{ 'zoom-regional': mapZoom >= 5 }">
             Zoom: {{ mapZoom }}
           </span>
         </div>
@@ -425,8 +405,8 @@ export default {
       radarTime: getRecentRadarTime(), // 1小时整点对齐的动态数据时次 (如 16:38 -> 16:00)
       isAutoTimeSync: true, // 跨越 1 小时整点窗口时是否自动刷新
       radarLayer: null,
-      woradLayer: null, // 全球 6km 宏观雷达底图 (负责 Zoom 0~9，0-4展示全球单张底图，5-9展示6km高清切片)
-      regionalLayers: {}, // 区域 2km 精细化切片雷达池 (earad, eurad, usrad)，负责 Zoom 10+ 视口自适应调度
+      woradLayer: null, // 全球 6km 宏观雷达底图 (负责 Zoom 1-4 全球单张底图，>=5 视口切片与避让)
+      regionalLayers: {}, // 区域 2km 精细化切片雷达池 (earad, eurad, usrad)，负责 Zoom >= 5 协同切片与网格调度
       isMeasuringDistance: false, // 是否处于地图测距交互中
       hasMeasureData: false, // 当前地图是否存在已完成的测距线条与标签
       activeRegionsInViewport: [], // 当前视口内相交的精细大区 ID 列表
@@ -456,7 +436,7 @@ export default {
       mapZoom: 3,
       debugParams: {
         radarMode: "earad", // 默认聚焦区域
-        minRegionalZoom: 9, // 斌哥指定分级：0-4全球底图，5-9全球6km切片，缩放层级 > 9 (即 10+) 才去加载 2km 精细化切片
+        minRegionalZoom: 4, // 1-4 全球底图，>=5 6km+2km 协同切片与网格
         opacity: 0.95,
         minThreshold: 0, // 过滤阈值默认为 0 dBZ，全显降雨回波面场
         rainOnly: false, // 斌哥指示：普通降雨、雷暴强对流、降雪协同全量叠加，杜绝漏块破洞
@@ -523,7 +503,7 @@ export default {
 
     modeStatusLabel() {
       if (this.currentMode === "auto") {
-        return this.mapZoom >= 10 && this.currentActiveRegion
+        return this.mapZoom >= 5 && this.currentActiveRegion
           ? `🤖 自动 (${this.currentActiveRegion.name})`
           : "🤖 全域自动";
       }
@@ -544,9 +524,9 @@ export default {
 
     statusBadgeText() {
       if (this.currentMode !== "auto") return "🔥 纯精细切片模式";
-      if (this.mapZoom >= 10 && this.currentActiveRegion) return "🔥 2km 超清叠加";
+      if (this.mapZoom >= 5 && this.currentActiveRegion) return "🔥 2km 超清叠加";
       if (this.mapZoom >= 5) return "🔥 6km 高清切片";
-      return "🌍 Z0-4 宏观底图";
+      return "🌍 Z1-4 宏观底图";
     },
 
     statusBadgeClass() {
@@ -560,12 +540,12 @@ export default {
         return found ? `${found.flag} ${found.name} (纯精细模式)` : "纯精细模式";
       }
       if (this.mapZoom < 5) {
-        return "🌍 全球宏观底图 (Z0-4)";
+        return "🌍 全球宏观底图 (Z1-4)";
       }
-      if (this.currentActiveRegion && this.mapZoom >= 10) {
+      if (this.currentActiveRegion && this.mapZoom >= 5) {
         return `${this.currentActiveRegion.flag} ${this.currentActiveRegion.name} 2km (已激活)`;
       }
-      return "🌍 全球 6km 高清切片网格 (Z5-9)";
+      return "🌍 全球 6km 高清切片网格 (Z5+)";
     },
 
     activeSourceLabel() {
@@ -573,10 +553,10 @@ export default {
         if (this.mapZoom < 5) {
           return "全球宏观底图 (Z1-4)";
         }
-        if (this.mapZoom >= 10 && this.currentActiveRegion) {
-          return `${this.currentActiveRegion.name} 2km + 6km`;
+        if (this.mapZoom >= 5 && this.currentActiveRegion) {
+          return `${this.currentActiveRegion.name} 2km + 全球 6km`;
         }
-        return "全球 6km 切片 (Z5-9)";
+        return "全球 6km 切片 (Z5+)";
       }
       return `${this.currentModeRegionName} 2km (独占)`;
     },
@@ -588,7 +568,7 @@ export default {
       if (this.currentMode === "global") {
         return "全球 6km";
       }
-      if (this.mapZoom >= 10 && this.currentActiveRegion) {
+      if (this.mapZoom >= 5 && this.currentActiveRegion) {
         return `${this.currentActiveRegion.name} 2km + 全球 6km`;
       }
       return "全球 6km";
@@ -597,7 +577,7 @@ export default {
     activeTilesSummary() {
       const targetId =
         this.currentMode === "auto"
-          ? (this.currentActiveRegion && this.mapZoom >= 10 ? this.currentActiveRegion.id : null)
+          ? (this.currentActiveRegion && this.mapZoom >= 5 ? this.currentActiveRegion.id : null)
           : this.currentMode;
 
       if (targetId && this.regionalStats[targetId]) {
@@ -766,9 +746,8 @@ export default {
 
     /**
      * 多尺度气象雷达协同初始化：
-     * 1. Zoom 0~4: 全球宏观底图 (whole_world)
-     * 2. Zoom 5~9: 全球 6km 高清切片网格 (WORAD HRES)
-     * 3. Zoom 10+: 三大区域 2km 超高分辨率切片雷达 (视口自适应按需拉取，大区内空间排他避让)
+     * 1. Zoom 1~4: 全球宏观底图 (whole_world)
+     * 2. Zoom >= 5: 6km + 2km 协同精细切片雷达 (大区内 2km 超高分辨率切片，大区外 6km 避让托底)
      */
     loadRadarLayer() {
       this.loadWoradLayer();
@@ -809,7 +788,7 @@ export default {
           rainOnly: this.debugParams.rainOnly,
           minRegionalZoom: 4, // Zoom > 4 (5+) 自动激活全球 6km 视口按需切片 (覆盖四川、西藏、新疆等东亚左侧及全球全境)
           maskRegionalBounds: this.currentMode === "auto", // 自动模式下激活大区避让，防止与 2km 区域图层重叠叠加
-          highResMaskZoom: 9, // Zoom > 9 (即 10+) 激活避让，交由 2km 超清独占渲染
+          highResMaskZoom: 4, // Zoom > 4 (即 5+) 激活避让，交由 2km 超清协同渲染
           minZoom: 1,
           maxZoom: 18,
           zIndex: 400,
@@ -863,8 +842,8 @@ export default {
             opacity: this.debugParams.opacity,
             minDbzThreshold: this.debugParams.minThreshold,
             rainOnly: this.debugParams.rainOnly,
-            minRegionalZoom: 9, // 缩放大于 9 (即 10+) 视口相交时自动拉取 2km 切片
-            minZoom: 10,
+            minRegionalZoom: 4, // 缩放大于 4 (即 5+) 视口相交时自动拉取 2km 切片
+            minZoom: 5, // 允许从 Zoom 5 开始渲染
             maxZoom: 18,
             zIndex: 410,
           }
@@ -974,7 +953,7 @@ export default {
 
     isRegionButtonActive(id) {
       if (this.currentMode === id) return true;
-      if (this.currentMode === "auto" && this.isRegionInViewport(id) && this.mapZoom >= 10) {
+      if (this.currentMode === "auto" && this.isRegionInViewport(id) && this.mapZoom >= 5) {
         return true;
       }
       return false;
@@ -985,7 +964,7 @@ export default {
         return "🎯 已锁定";
       }
       if (this.currentMode === "auto") {
-        if (this.mapZoom >= 10 && this.isRegionInViewport(id)) {
+        if (this.mapZoom >= 5 && this.isRegionInViewport(id)) {
           return "🟢 2km已激活";
         }
         if (this.isRegionInViewport(id)) {
@@ -1014,11 +993,11 @@ export default {
           }
           this.woradLayer.redraw();
         }
-        // 恢复 2km 区域切片图层的默认层级门槛 (zoom > 9，即 10+ 激活)
+        // 恢复 2km 区域切片图层的默认层级门槛 (zoom > 4，即 5+ 激活)
         Object.values(this.regionalLayers).forEach((layer) => {
           if (layer) {
-            layer.options.minZoom = 10;
-            layer.options.minRegionalZoom = 9;
+            layer.options.minZoom = 5;
+            layer.options.minRegionalZoom = 4;
           }
         });
         this.ensureAllRegionalLayersLoaded();
@@ -1145,7 +1124,7 @@ export default {
         }
       } else {
         // 全域自动模式 (auto)：根据光标所在大区优先拾取 2km 切片
-        if (this.mapZoom >= 10) {
+        if (this.mapZoom >= 5) {
           const lat = e.latlng.lat;
           const lng = e.latlng.lng;
           const normLon = ((((lng + 180) % 360) + 360) % 360) - 180;
@@ -1481,7 +1460,7 @@ export default {
 
       // 1. 判定 2km 大区网格任务：
       // - 若处于定向大区模式 (earad/eurad/usrad)：目标大区锁定激活（全层级使用 2km 数据与 2km 网格）
-      // - 若处于自动自适应模式 (auto)：缩放层级 zoom >= 10 且视口与 2km 区域相交时激活
+      // - 若处于自动自适应模式 (auto)：缩放层级 zoom >= 5 且视口与 2km 区域相交时激活
       if (isRegionalMode) {
         const r = this.regionalList.find((item) => item.id === this.currentMode);
         if (r) {
@@ -1507,7 +1486,7 @@ export default {
             }
           }
         }
-      } else if (isAuto && zoom >= 10) {
+      } else if (isAuto && zoom >= 5) {
         for (const r of this.regionalList) {
           const b = r.bounds;
           if (vWest < b.east && vEast > b.west && vSouth < b.north && vNorth > b.south) {
@@ -1536,7 +1515,7 @@ export default {
       // 2. 判定全球 6km 底图网格任务 (worad_hres)：
       // - 若处于定向大区模式：底图被移除，绝不画 6km 网格！
       // - 若处于纯全球模式或自动自适应模式：只要 woradLayer 就绪即推入 6km 任务
-      //   (在自动模式 zoom >= 10 存在 2km 区域时，通过 Canvas 裁剪自动避让 2km 区域，实现 2km 区域画 2km 网格，外围全画 6km 网格)
+      //   (在自动模式 zoom >= 5 存在 2km 区域时，通过 Canvas 裁剪自动避让 2km 区域，实现 2km 区域画 2km 网格，外围全画 6km 网格)
       if (!isRegionalMode && this.woradLayer && this.woradLayer._rawGrid && this.woradLayer._gridWidth > 0) {
         const b = { west: -180, east: 180, south: -90, north: 90 };
         const w = this.woradLayer._gridWidth;
