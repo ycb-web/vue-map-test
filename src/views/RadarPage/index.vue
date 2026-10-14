@@ -44,7 +44,7 @@
         v-if="debugParams.showExtraInfo && cursorTooltip.desc"
         class="capsule-extra"
       >
-        {{ cursorTooltip.desc }} · {{ cursorTooltip.rainRate }} mm/h
+        {{ cursorTooltip.desc }} · {{ cursorTooltip.rainRate }} mm/h ({{ cursorTooltip.rainRateInH || 0 }} in/h)
       </span>
     </div>
 
@@ -384,6 +384,424 @@
         </div>
       </div>
     </div>
+
+    <!-- ===================================================
+         地图点击点位：双灰度图详细信息 Modal (dBZ + Type)
+         =================================================== -->
+    <div
+      v-if="pointModalVisible && pointModalData"
+      class="radar-point-modal-backdrop"
+      @click.self="closePointModal"
+    >
+      <div class="radar-point-modal-dialog" role="dialog" aria-modal="true">
+        <!-- 弹窗头部 -->
+        <div class="modal-header">
+          <div class="modal-header-left">
+            <div class="modal-title-row">
+              <span class="modal-title-icon">🎯</span>
+              <span class="modal-title-text">点位底层灰度切片详细探针</span>
+              <span class="modal-source-badge">{{ pointModalData.modelName }}</span>
+            </div>
+            <div class="modal-meta-bar">
+              <span class="meta-pill">📍 经纬度: {{ pointModalData.lng }}°E, {{ pointModalData.lat }}°N</span>
+              <span class="meta-pill">🔲 矩阵像素: ({{ pointModalData.pixelX }}, {{ pointModalData.pixelY }})</span>
+              <span v-if="pointModalData.isTiled" class="meta-pill">
+                🧱 切片行列: [{{ pointModalData.tileX }}, {{ pointModalData.tileY }}] ({{ pointModalData.tileW }}×{{ pointModalData.tileH }}px)
+              </span>
+              <span class="meta-pill">🕒 数据时次: {{ radarTime.localStr }} (UTC {{ radarTime.utcHourMin }})</span>
+            </div>
+          </div>
+          <button
+            class="modal-close-btn"
+            type="button"
+            title="关闭弹窗 (ESC)"
+            @click="closePointModal"
+          >
+            ✕
+          </button>
+        </div>
+
+        <!-- 弹窗主体：左边一张图，右边一张图 -->
+        <div class="modal-body-two-cols">
+          <!-- 左侧：dBZ 回波强度灰度图卡片 -->
+          <div class="modal-col-card card-dbz">
+            <div class="card-header">
+              <div class="card-header-title">
+                <span class="col-icon">📊</span>
+                <span>回波强度灰度图 (srazky_dbz)</span>
+              </div>
+              <span class="card-raw-tag">G 通道灰度</span>
+            </div>
+
+            <!-- 切片图像视口（带十字准心精准定位） -->
+            <div class="modal-tile-preview-box">
+              <div class="tile-img-wrapper">
+                <img
+                  :src="pointModalData.dbzUrl"
+                  class="modal-tile-img"
+                  alt="dBZ 灰度切片原图"
+                  @error="handleTileImgError($event, pointModalData.dbzDirectUrl)"
+                />
+                <!-- 十字准心线 -->
+                <div
+                  class="tile-reticle-h"
+                  :style="{ top: pointModalData.inTilePercentY + '%' }"
+                ></div>
+                <div
+                  class="tile-reticle-v"
+                  :style="{ left: pointModalData.inTilePercentX + '%' }"
+                ></div>
+                <!-- 准心红点 -->
+                <div
+                  class="tile-reticle-point"
+                  :style="{
+                    left: pointModalData.inTilePercentX + '%',
+                    top: pointModalData.inTilePercentY + '%'
+                  }"
+                  :title="'切片内坐标: (' + pointModalData.inTileX + ', ' + pointModalData.inTileY + ')'"
+                >
+                  <span class="reticle-pulse"></span>
+                </div>
+              </div>
+              <div class="tile-coord-tag">
+                切片内偏移: X: {{ pointModalData.inTileX }}px, Y: {{ pointModalData.inTileY }}px ({{ pointModalData.inTilePercentX }}%, {{ pointModalData.inTilePercentY }}%)
+              </div>
+            </div>
+
+            <!-- 数值清单 -->
+            <div class="card-data-grid">
+              <div class="data-item highlight">
+                <span class="data-label">原始灰度值 (Raw Value):</span>
+                <span class="data-value num-cyan">{{ pointModalData.rawDbz }} <span class="unit">/ 255</span></span>
+              </div>
+              <div class="data-item highlight">
+                <div class="data-label-wrap">
+                  <span class="data-label">物理反射率 (Calibrated):</span>
+                  <span class="calc-method-badge method-gold">双线性空间插值</span>
+                </div>
+                <span class="data-value num-gold">{{ pointModalData.dbz }} <span class="unit">dBZ</span></span>
+              </div>
+              <div class="data-item">
+                <div class="data-label-wrap">
+                  <span class="data-label">估算雨强 (Rain Rate):</span>
+                  <span class="calc-method-badge method-cyan">Z-R 物理反演</span>
+                </div>
+                <span class="data-value num-rain-rate">
+                  <span class="num-mm">{{ pointModalData.rainRate }} <span class="unit">mm/h</span></span>
+                  <span class="unit-divider">/</span>
+                  <span class="num-inch">{{ pointModalData.rainRateInH != null ? pointModalData.rainRateInH : (Math.round((pointModalData.rainRate / 25.4) * 100) / 100) }} <span class="unit">in/h</span></span>
+                </span>
+              </div>
+              <div class="data-item">
+                <span class="data-label">降雨强度分级:</span>
+                <span class="data-value">{{ pointModalData.desc }}</span>
+              </div>
+              <div class="data-item full-row">
+                <span class="data-label">切片文件名:</span>
+                <a
+                  :href="pointModalData.dbzDirectUrl || pointModalData.dbzUrl"
+                  target="_blank"
+                  class="data-link"
+                  title="在新窗口查看切片原图"
+                >
+                  {{ pointModalData.dbzFileName }} ↗
+                </a>
+              </div>
+            </div>
+
+            <!-- 核心算法与计算推导公式卡片 -->
+            <div class="calc-formula-card">
+              <div class="calc-formula-title">
+                <span class="formula-icon">📐</span>
+                <span>核心物理量计算推导与算法原理：</span>
+              </div>
+
+              <!-- 1. 物理反射率 (dBZ) 计算推导 -->
+              <div class="formula-block formula-dbz-block">
+                <div class="formula-block-head">
+                  <div class="formula-head-left">
+                    <span class="formula-num-badge badge-gold">1</span>
+                    <span class="formula-target-name">物理反射率 ({{ pointModalData.dbz }} dBZ) 的计算算法</span>
+                  </div>
+                  <span class="formula-type-tag">四邻域双线性插值 (Bilinear Interpolation)</span>
+                </div>
+                <div class="formula-block-body">
+                  <div class="formula-math-line">
+                    <code>dBZ = v₀₀·(1-dx)(1-dy) + v₁₀·dx(1-dy) + v₀₁·(1-dx)dy + v₁₁·dxdy</code>
+                  </div>
+                  <div class="formula-desc-text" v-if="pointModalData.interpDetail">
+                    • <strong>推导过程</strong>：点击经纬度落入像素网格中间，取周围 4 顶点像素
+                    <code>[左上:{{ pointModalData.interpDetail.v00 }}, 右上:{{ pointModalData.interpDetail.v10 }}, 左下:{{ pointModalData.interpDetail.v01 }}, 右下:{{ pointModalData.interpDetail.v11 }}]</code>
+                    按距离浮点权重加权平均，计算得连续平滑值 <strong>{{ pointModalData.interpDetail.rawCalc }}</strong>，四舍五入为 <strong>{{ pointModalData.dbz }} dBZ</strong>（消除像素锯齿阶梯感）。
+                  </div>
+                </div>
+              </div>
+
+              <!-- 2. 估算雨强 (Rain Rate) 计算推导 -->
+              <div class="formula-block formula-rain-block">
+                <div class="formula-block-head">
+                  <div class="formula-head-left">
+                    <span class="formula-num-badge badge-cyan">2</span>
+                    <span class="formula-target-name">估算雨强 ({{ pointModalData.rainRate }} mm/h / {{ pointModalData.rainRateInH }} in/h) 的物理反演</span>
+                  </div>
+                  <span class="formula-type-tag">马歇尔-帕尔默公式 (Marshall-Palmer: Z = 200 · R^1.6)</span>
+                </div>
+                <div class="formula-block-body">
+                  <div class="formula-math-line">
+                    <code>步骤 ① 线性反射率: Z = 10^(dBZ/10) = 10^({{ pointModalData.dbz }}/10) ≈ {{ pointModalData.linearZ || (Math.round(Math.pow(10, pointModalData.dbz/10)*10)/10) }}</code>
+                    <br/>
+                    <code>步骤 ② 降水强度反演: R = (Z / 200)^(1 / 1.6) ≈ <strong>{{ pointModalData.rainRate }} mm/h</strong></code>
+                    <br/>
+                    <code>步骤 ③ 英制单位换算: {{ pointModalData.rainRate }} ÷ 25.4 ≈ <strong>{{ pointModalData.rainRateInH }} in/h</strong> (1 inch = 25.4 mm)</code>
+                  </div>
+                  <div class="formula-desc-text">
+                    • <strong>推导过程</strong>：雷达电磁波反射率（dBZ）本身无法直接称重降水量，通过国际气象学标准层状云经验公式 $Z = 200 \times R^{1.6}$ 反解公制雨强 $R$（mm/h），再按标准 $1\text{ in} = 25.4\text{ mm}$ 同步换算为英制单位 <strong>{{ pointModalData.rainRateInH }} in/h</strong>。
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 所选点位通道数据还原 -->
+            <div class="rgba-table-wrapper">
+              <div class="rgba-table-title">💡 底层通道与数据结构还原：</div>
+              <table class="rgba-detail-table">
+                <thead>
+                  <tr>
+                    <th>数据结构层级</th>
+                    <th>原始值 (Byte)</th>
+                    <th>物理代表意义 / 解码用途</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr class="ch-row-highlight">
+                    <td><span class="ch-badge ch-g">底层物理单通道</span></td>
+                    <td class="ch-val num-cyan">{{ pointModalData.rawDbz }} / 255</td>
+                    <td><strong>唯一存储的数据</strong>：换算为 <strong>{{ pointModalData.dbz }} dBZ</strong> ({{ pointModalData.desc }})</td>
+                  </tr>
+                  <tr>
+                    <td><span class="ch-badge ch-a">浏览器 Canvas 映射</span></td>
+                    <td class="ch-val">RGBA({{ pointModalData.rawDbz }}, {{ pointModalData.rawDbz }}, {{ pointModalData.rawDbz }}, 255)</td>
+                    <td>由浏览器图形底层按 R=G=B 自动镜像映射，三者数值完全等价</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <!-- 回波反射率 dBZ 灰度区间速查对照表 -->
+            <div class="rgba-table-wrapper range-table-wrapper">
+              <div class="rgba-table-title">
+                <span>📑 左图回波切片 G 通道【dBZ 灰度区间速查对照表】：</span>
+              </div>
+              <table class="rgba-detail-table range-detail-table">
+                <thead>
+                  <tr>
+                    <th style="width: 22%;">灰度 / dBZ 区间</th>
+                    <th style="width: 22%;">强度分类</th>
+                    <th style="width: 22%;">估算雨强</th>
+                    <th>气象特征与回波表现</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr
+                    v-for="item in dbzRangeList"
+                    :key="item.label"
+                    :class="{ 'row-active-hit hit-dbz': isDbzRowActive(item) }"
+                  >
+                    <td>
+                      <span class="range-code-badge dbz-badge">{{ item.label }}</span>
+                    </td>
+                    <td>
+                      <span class="range-desc-text">{{ item.desc }}</span>
+                    </td>
+                    <td class="ch-val num-cyan-sub">
+                      <div>{{ item.rainRate }}</div>
+                      <div v-if="item.rainRateInH" class="sub-inch-text">{{ item.rainRateInH }}</div>
+                    </td>
+                    <td class="feature-cell">
+                      <span>{{ item.feature }}</span>
+                      <span v-if="isDbzRowActive(item)" class="hit-indicator-pill hit-pill-cyan">
+                        👈 当前命中 (点位值: {{ pointModalData.rawDbz }})
+                      </span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- 右侧：相态类型灰度图卡片 -->
+          <div class="modal-col-card card-type">
+            <div class="card-header">
+              <div class="card-header-title">
+                <span class="col-icon">🌈</span>
+                <span>相态类型灰度图 (srazky_type_dbz)</span>
+              </div>
+              <span class="card-raw-tag">R 通道相态</span>
+            </div>
+
+            <!-- 切片图像视口（带十字准心精准定位） -->
+            <div class="modal-tile-preview-box">
+              <div class="tile-img-wrapper">
+                <img
+                  :src="pointModalData.typeUrl"
+                  class="modal-tile-img"
+                  alt="相态类型灰度切片原图"
+                  @error="handleTileImgError($event, pointModalData.typeDirectUrl)"
+                />
+                <!-- 十字准心线 -->
+                <div
+                  class="tile-reticle-h"
+                  :style="{ top: pointModalData.inTilePercentY + '%' }"
+                ></div>
+                <div
+                  class="tile-reticle-v"
+                  :style="{ left: pointModalData.inTilePercentX + '%' }"
+                ></div>
+                <!-- 准心红点 -->
+                <div
+                  class="tile-reticle-point"
+                  :style="{
+                    left: pointModalData.inTilePercentX + '%',
+                    top: pointModalData.inTilePercentY + '%'
+                  }"
+                  :title="'切片内坐标: (' + pointModalData.inTileX + ', ' + pointModalData.inTileY + ')'"
+                >
+                  <span class="reticle-pulse"></span>
+                </div>
+              </div>
+              <div class="tile-coord-tag">
+                切片内偏移: X: {{ pointModalData.inTileX }}px, Y: {{ pointModalData.inTileY }}px ({{ pointModalData.inTilePercentX }}%, {{ pointModalData.inTilePercentY }}%)
+              </div>
+            </div>
+
+            <!-- 数值清单 -->
+            <div class="card-data-grid">
+              <div class="data-item highlight">
+                <span class="data-label">原始相态值 (Raw Type):</span>
+                <span class="data-value num-pink">
+                  {{ pointModalData.rawType }}
+                  <span class="unit">/ 255 (命中区间: {{ pointModalData.typeRange || '35 ~ 44' }})</span>
+                </span>
+              </div>
+              <div class="data-item highlight">
+                <span class="data-label">官方相态编码 (Type Code):</span>
+                <span class="data-value num-purple">{{ pointModalData.type }} ({{ pointModalData.typeDesc }})</span>
+              </div>
+              <div class="data-item">
+                <span class="data-label">气象相态类别:</span>
+                <span
+                  class="capsule-type-tag"
+                  :class="'type-' + (pointModalData.type || 10)"
+                >
+                  {{ pointModalData.typeDesc || "无" }}
+                </span>
+              </div>
+              <div class="data-item">
+                <span class="data-label">对流特征属性:</span>
+                <span class="data-value">
+                  <span v-if="pointModalData.isStorm" class="feat-badge feat-storm">⚡ 雷暴/强对流</span>
+                  <span v-else-if="pointModalData.isSnow" class="feat-badge feat-snow">❄️ 降雪相态</span>
+                  <span v-else class="feat-badge feat-normal">普通降雨</span>
+                </span>
+              </div>
+              <div class="data-item full-row">
+                <span class="data-label">切片文件名:</span>
+                <a
+                  :href="pointModalData.typeDirectUrl || pointModalData.typeUrl"
+                  target="_blank"
+                  class="data-link"
+                  title="在新窗口查看切片原图"
+                >
+                  {{ pointModalData.typeFileName }} ↗
+                </a>
+              </div>
+            </div>
+
+            <!-- 所选点位通道数据还原 -->
+            <div class="rgba-table-wrapper">
+              <div class="rgba-table-title">💡 底层通道与数据结构还原：</div>
+              <table class="rgba-detail-table">
+                <thead>
+                  <tr>
+                    <th>数据结构层级</th>
+                    <th>原始值 (Byte)</th>
+                    <th>物理代表意义 / 解码用途</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr class="ch-row-highlight">
+                    <td><span class="ch-badge ch-r">底层物理单通道</span></td>
+                    <td class="ch-val num-pink">{{ pointModalData.rawType }} / 255</td>
+                    <td><strong>唯一存储的数据</strong>：落入 <strong>{{ pointModalData.typeRange || '35 ~ 44' }}</strong> 灰度区间，判定为 <strong>{{ pointModalData.typeDesc }}</strong></td>
+                  </tr>
+                  <tr>
+                    <td><span class="ch-badge ch-a">浏览器 Canvas 映射</span></td>
+                    <td class="ch-val">RGBA({{ pointModalData.rawType }}, {{ pointModalData.rawType }}, {{ pointModalData.rawType }}, 255)</td>
+                    <td>由浏览器图形底层按 R=G=B 自动镜像映射，三者数值完全等价</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <!-- 全相态灰度区间映射速查表 (与 Ventusky 官方逆向分类 1:1 对齐) -->
+            <div class="rgba-table-wrapper range-table-wrapper">
+              <div class="rgba-table-title">
+                <span>📑 右图相态切片 R 通道【全相态灰度区间映射速查表】：</span>
+              </div>
+              <table class="rgba-detail-table range-detail-table">
+                <thead>
+                  <tr>
+                    <th style="width: 20%;">R 通道原始灰度区间</th>
+                    <th style="width: 20%;">气象相态分类</th>
+                    <th style="width: 18%;">官方相态编码 (Type Code)</th>
+                    <th>物理特征说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr
+                    v-for="item in phaseRangeList"
+                    :key="item.label"
+                    :class="{ 'row-active-hit hit-type': isPhaseRowActive(item) }"
+                  >
+                    <td>
+                      <span class="range-code-badge type-badge">{{ item.label }}</span>
+                    </td>
+                    <td>
+                      <span class="capsule-type-tag" :class="item.tagClass">
+                        {{ item.desc }}
+                      </span>
+                    </td>
+                    <td>
+                      <span class="code-number-pill">{{ item.code }}</span>
+                    </td>
+                    <td class="feature-cell">
+                      <span>{{ item.feature }}</span>
+                      <span v-if="isPhaseRowActive(item)" class="hit-indicator-pill hit-pill-pink">
+                        👈 当前命中 (点位值: {{ pointModalData.rawType }})
+                      </span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- 弹窗底部 -->
+        <div class="modal-footer">
+          <span class="footer-tip">
+            💡 提示：点击地图任意其他位置可直接切换点位；按 <kbd>ESC</kbd> 或点击遮罩即可关闭
+          </span>
+          <button
+            class="modal-action-btn"
+            type="button"
+            @click="closePointModal"
+          >
+            关闭 (ESC)
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -419,6 +837,28 @@ export default {
       boundaryLayerGroup: null, // 三大精细雷达作用范围边界图层组
       currentMode: "auto", // 当前雷达工作模式: 'auto'(全域智能联动) | 'global'(纯全球底图) | 'earad'(东亚) | 'eurad'(欧洲) | 'usrad'(北美)
       panelCollapsed: false,
+      // 地图点击弹出双灰度图 (dBZ / Type) 详细分析 Modal
+      pointModalVisible: false,
+      pointModalData: null,
+      clickedPointMarker: null,
+      // 全相态灰度区间映射速查定义 (与 Ventusky 官方逆向分类 1:1 对齐)
+      phaseRangeList: [
+        { min: 0, max: 14, label: "0 ~ 14", desc: "降雨", code: 10, feature: "普通液态降雨 (毛毛雨、小雨、中雨、大雨)", tagClass: "type-10" },
+        { min: 15, max: 34, label: "15 ~ 34", desc: "降雪", code: 30, feature: "纯固态雪晶相态", tagClass: "type-30" },
+        { min: 35, max: 44, label: "35 ~ 44", desc: "⚡ 雷暴", code: 40, feature: "强对流不稳定层结，伴随雷电、狂风与短时暴雨", tagClass: "type-40" },
+        { min: 45, max: 54, label: "45 ~ 54", desc: "冻雨", code: 50, feature: "过冷雨滴，触地即冻", tagClass: "type-50" },
+        { min: 55, max: 64, label: "55 ~ 64", desc: "冰雹", code: 60, feature: "强烈垂直对流凝结的硬质冰球", tagClass: "type-60" },
+        { min: 65, max: 255, label: "≥ 65", desc: "雨夹雪", code: 70, feature: "冰水混合物降水", tagClass: "type-70" },
+      ],
+      // 回波反射率 dBZ 灰度区间速查对照定义
+      dbzRangeList: [
+        { min: 0, max: 9, label: "< 10", desc: "无明显降水", rainRate: "~ 0 mm/h", rainRateInH: "~ 0 in/h", feature: "晴空 / 微弱云滴反射" },
+        { min: 10, max: 19, label: "10 ~ 19", desc: "微量毛毛雨", rainRate: "0.1 ~ 0.5 mm/h", rainRateInH: "0.004 ~ 0.02 in/h", feature: "轻微弱回波" },
+        { min: 20, max: 29, label: "20 ~ 29", desc: "小雨", rainRate: "0.5 ~ 2.5 mm/h", rainRateInH: "0.02 ~ 0.10 in/h", feature: "常规降雨" },
+        { min: 30, max: 39, label: "30 ~ 39", desc: "中雨", rainRate: "2.5 ~ 8.0 mm/h", rainRateInH: "0.10 ~ 0.31 in/h", feature: "中等强度对流" },
+        { min: 40, max: 49, label: "40 ~ 49", desc: "大雨到暴雨", rainRate: "8.0 ~ 30 mm/h", rainRateInH: "0.31 ~ 1.18 in/h", feature: "较强降水回波" },
+        { min: 50, max: 255, label: "≥ 50", desc: "大暴雨 / 强对流", rainRate: "> 30 mm/h", rainRateInH: "> 1.18 in/h", feature: "极端强降水、雷雨大风、冰雹云" },
+      ],
       cursorTooltip: {
         visible: false,
         x: 0,
@@ -428,6 +868,7 @@ export default {
         type: 10,
         typeDesc: "",
         rainRate: 0,
+        rainRateInH: 0,
       },
       mousePos: {
         lat: null,
@@ -605,9 +1046,12 @@ export default {
     this.loadRadarLayer();
     this.initBoundaryLayers();
     this.initTimeWatcher();
+    window.addEventListener("keydown", this.onKeydown);
   },
 
   beforeDestroy() {
+    window.removeEventListener("keydown", this.onKeydown);
+    this.closePointModal();
     if (this._timeWatcherTimer) {
       clearInterval(this._timeWatcherTimer);
       this._timeWatcherTimer = null;
@@ -628,6 +1072,7 @@ export default {
       this._gridCanvas = null;
     }
     if (this.map) {
+      this.map.off("click", this.onMapClick);
       this.map.off("mousemove", this.onMapMouseMove);
       this.map.off("mouseout", this.onMapMouseOut);
       if (this.woradLayer) {
@@ -686,6 +1131,7 @@ export default {
         layers: [baseLayer],
       });
 
+      this.map.on("click", this.onMapClick);
       this.map.on("mousemove", this.onMapMouseMove);
       this.map.on("mouseout", this.onMapMouseOut);
       if (this.$refs.mapContainer) {
@@ -1158,6 +1604,7 @@ export default {
           this.cursorTooltip.type = 10;
           this.cursorTooltip.typeDesc = "";
           this.cursorTooltip.rainRate = 0;
+          this.cursorTooltip.rainRateInH = 0;
           this.cursorTooltip.visible = true;
         } else {
           this.cursorTooltip.visible = false;
@@ -1174,6 +1621,7 @@ export default {
         this.cursorTooltip.type = res.type;
         this.cursorTooltip.typeDesc = res.typeDesc || "降水";
         this.cursorTooltip.rainRate = res.rainRate;
+        this.cursorTooltip.rainRateInH = res.rainRateInH || 0;
         this.cursorTooltip.visible = true;
       } else if (this.debugParams.alwaysShowTooltip) {
         this.cursorTooltip.dbz = Math.round(dbz);
@@ -1181,6 +1629,7 @@ export default {
         this.cursorTooltip.type = res.type;
         this.cursorTooltip.typeDesc = res.typeDesc || "";
         this.cursorTooltip.rainRate = 0;
+        this.cursorTooltip.rainRateInH = 0;
         this.cursorTooltip.visible = true;
       } else {
         this.cursorTooltip.visible = false;
@@ -1201,6 +1650,122 @@ export default {
       this.hideCursorTooltip();
       this.mousePos.lat = null;
       this.mousePos.lng = null;
+    },
+
+    /**
+     * 地图点击：捕获点击点位底层双灰度切片 (dBZ 与相态) 并弹出详细信息对比 Modal
+     */
+    onMapClick(e) {
+      if (this.isMeasuringDistance) return; // 正在测距交互中时不触发点位弹窗
+      if (!this.map || !e || !e.latlng) return;
+
+      const lat = e.latlng.lat;
+      const lng = e.latlng.lng;
+      const normLon = ((((lng + 180) % 360) + 360) % 360) - 180;
+
+      let targetLayer = null;
+      if (this.currentMode !== "auto") {
+        targetLayer = this.regionalLayers[this.currentMode] || this.woradLayer;
+      } else {
+        // 全域自动模式 (auto)：若当前 Zoom >= 5 且光标处于东亚/欧洲/北美三大精细大区内，优先取 2km 精细切片图层
+        if (this.mapZoom >= 5) {
+          const matchedRegion = this.regionalList.find((r) => {
+            const b = r.bounds;
+            return normLon >= b.west && normLon <= b.east && lat >= b.south && lat <= b.north;
+          });
+          if (
+            matchedRegion &&
+            this.regionalLayers[matchedRegion.id] &&
+            this.regionalLayers[matchedRegion.id]._isLoaded
+          ) {
+            targetLayer = this.regionalLayers[matchedRegion.id];
+          }
+        }
+        if (!targetLayer) {
+          targetLayer = this.woradLayer;
+        }
+      }
+
+      if (!targetLayer || typeof targetLayer.getDetailedPointInfo !== "function") return;
+
+      const info = targetLayer.getDetailedPointInfo(lat, normLon);
+      if (!info) return;
+
+      this.pointModalData = info;
+      this.pointModalVisible = true;
+      this.updateClickedMarker(e.latlng);
+    },
+
+    /**
+     * 更新或创建地图上的选中点位准心标记 (Marker)
+     */
+    updateClickedMarker(latlng) {
+      if (!this.map) return;
+      if (this.clickedPointMarker) {
+        this.clickedPointMarker.setLatLng(latlng);
+      } else {
+        const icon = L.divIcon({
+          className: "radar-clicked-point-pin",
+          html: `<div class="pin-pulse"></div><div class="pin-cross"></div>`,
+          iconSize: [28, 28],
+          iconAnchor: [14, 14],
+        });
+        this.clickedPointMarker = L.marker(latlng, {
+          icon,
+          zIndexOffset: 3000,
+        }).addTo(this.map);
+      }
+    },
+
+    /**
+     * 关闭点位灰度切片分析 Modal
+     */
+    closePointModal() {
+      this.pointModalVisible = false;
+      this.pointModalData = null;
+      if (this.clickedPointMarker && this.map) {
+        this.map.removeLayer(this.clickedPointMarker);
+        this.clickedPointMarker = null;
+      }
+    },
+
+    /**
+     * ESC 快捷键关闭
+     */
+    onKeydown(e) {
+      if (e.key === "Escape" || e.keyCode === 27) {
+        if (this.pointModalVisible) {
+          this.closePointModal();
+        }
+      }
+    },
+
+    /**
+     * 切片图片加载失败容灾切换
+     */
+    handleTileImgError(e, directUrl) {
+      if (e && e.target && directUrl && !e.target.dataset.triedFallback) {
+        e.target.dataset.triedFallback = "1";
+        e.target.src = directUrl;
+      }
+    },
+
+    /**
+     * 判断相态速查表中某一行是否命中当前选中点位 (0~255 单通道灰度)
+     */
+    isPhaseRowActive(item) {
+      if (!this.pointModalData) return false;
+      const v = this.pointModalData.rawType != null ? this.pointModalData.rawType : 0;
+      return v >= item.min && v <= item.max;
+    },
+
+    /**
+     * 判断 dBZ 回波速查表中某一行是否命中当前选中点位
+     */
+    isDbzRowActive(item) {
+      if (!this.pointModalData) return false;
+      const v = this.pointModalData.rawDbz != null ? this.pointModalData.rawDbz : Math.round(this.pointModalData.dbz || 0);
+      return v >= item.min && v <= item.max;
     },
 
     /**
@@ -1829,15 +2394,15 @@ export default {
 }
 
 .capsule-type-tag.type-30 {
-  background: rgba(239, 68, 68, 0.14);
-  color: #dc2626;
-  border-color: rgba(239, 68, 68, 0.35);
-}
-
-.capsule-type-tag.type-40 {
   background: rgba(99, 102, 241, 0.14);
   color: #4f46e5;
   border-color: rgba(99, 102, 241, 0.35);
+}
+
+.capsule-type-tag.type-40 {
+  background: rgba(239, 68, 68, 0.14);
+  color: #dc2626;
+  border-color: rgba(239, 68, 68, 0.35);
 }
 
 .capsule-type-tag.type-50 {
@@ -3002,5 +3567,894 @@ input:checked + .slider-round:before {
   pointer-events: none;
   border: 1px solid rgba(255, 255, 255, 0.3);
   letter-spacing: 0.3px;
+}
+
+/* ===================================================
+   地图点击点位：双灰度图详细信息 Modal 样式
+   =================================================== */
+.radar-point-modal-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2500;
+  background: rgba(4, 9, 20, 0.72);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: modal-fade-in 0.22s ease-out;
+}
+
+@keyframes modal-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.radar-point-modal-dialog {
+  width: 1080px;
+  max-width: 96vw;
+  max-height: 92vh;
+  background: rgba(15, 23, 42, 0.94);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 16px;
+  box-shadow: 0 25px 60px -10px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: modal-scale-up 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes modal-scale-up {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* 弹窗头部 */
+.modal-header {
+  padding: 16px 20px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  background: linear-gradient(180deg, rgba(30, 41, 59, 0.4) 0%, rgba(15, 23, 42, 0) 100%);
+}
+
+.modal-header-left {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.modal-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.modal-title-icon {
+  font-size: 20px;
+}
+
+.modal-title-text {
+  font-size: 16px;
+  font-weight: 700;
+  color: #f8fafc;
+  letter-spacing: 0.3px;
+}
+
+.modal-source-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 9px;
+  border-radius: 9999px;
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.35);
+}
+
+.modal-meta-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.meta-pill {
+  font-size: 11px;
+  color: #94a3b8;
+  background: rgba(30, 41, 59, 0.7);
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-family: 'JetBrains Mono', Consolas, Monaco, monospace;
+}
+
+.modal-close-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #94a3b8;
+  font-size: 15px;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.modal-close-btn:hover {
+  background: rgba(239, 68, 68, 0.2);
+  color: #f87171;
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+/* 弹窗主体：左边一张图，右边一张图 */
+.modal-body-two-cols {
+  padding: 20px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  overflow-y: auto;
+  max-height: calc(92vh - 140px);
+}
+
+.modal-col-card {
+  background: rgba(30, 41, 59, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  transition: border-color 0.2s;
+}
+
+.modal-col-card:hover {
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.card-dbz {
+  border-top: 3px solid #38bdf8;
+}
+
+.card-type {
+  border-top: 3px solid #ec4899;
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.card-header-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #f1f5f9;
+}
+
+.col-icon {
+  font-size: 15px;
+}
+
+.card-raw-tag {
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #cbd5e1;
+  font-family: 'JetBrains Mono', Consolas, Monaco, monospace;
+}
+
+/* 切片图像视口 */
+.modal-tile-preview-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tile-img-wrapper {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  max-height: 280px;
+  background: #020617;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal-tile-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: pixelated;
+  display: block;
+}
+
+/* 十字准心标定 */
+.tile-reticle-h {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: rgba(239, 68, 68, 0.85);
+  box-shadow: 0 0 4px rgba(239, 68, 68, 0.9);
+  pointer-events: none;
+  transform: translateY(-0.5px);
+}
+
+.tile-reticle-v {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(239, 68, 68, 0.85);
+  box-shadow: 0 0 4px rgba(239, 68, 68, 0.9);
+  pointer-events: none;
+  transform: translateX(-0.5px);
+}
+
+.tile-reticle-point {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.reticle-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ef4444;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.9), 0 0 10px rgba(239, 68, 68, 0.9);
+  animation: reticle-pulse-anim 1.5s infinite;
+}
+
+@keyframes reticle-pulse-anim {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.4);
+    opacity: 0.7;
+  }
+}
+
+.tile-coord-tag {
+  font-size: 11px;
+  color: #94a3b8;
+  font-family: 'JetBrains Mono', Consolas, Monaco, monospace;
+  text-align: center;
+}
+
+/* 详细数据网格 */
+.card-data-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.data-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: rgba(15, 23, 42, 0.6);
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.data-item.highlight {
+  background: rgba(30, 41, 59, 0.8);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.data-item.full-row {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.data-label {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.data-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: #f1f5f9;
+  font-family: 'JetBrains Mono', Consolas, Monaco, monospace;
+}
+
+.unit {
+  font-size: 11px;
+  color: #64748b;
+  font-weight: normal;
+}
+
+.num-cyan {
+  color: #38bdf8;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.num-gold {
+  color: #fbbf24;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.num-pink {
+  color: #f472b6;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.num-purple {
+  color: #c084fc;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.data-link {
+  font-size: 11px;
+  color: #38bdf8;
+  text-decoration: none;
+  font-family: 'JetBrains Mono', Consolas, Monaco, monospace;
+  word-break: break-all;
+  display: inline-block;
+  transition: color 0.2s;
+}
+
+.data-link:hover {
+  color: #7dd3fc;
+  text-decoration: underline;
+}
+
+.feat-badge {
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.feat-storm {
+  background: rgba(239, 68, 68, 0.2);
+  color: #fca5a5;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+}
+
+.feat-snow {
+  background: rgba(99, 102, 241, 0.2);
+  color: #c7d2fe;
+  border: 1px solid rgba(99, 102, 241, 0.4);
+}
+
+.feat-normal {
+  background: rgba(14, 165, 233, 0.15);
+  color: #7dd3fc;
+}
+
+/* 弹窗底部 */
+.modal-footer {
+  padding: 12px 20px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: rgba(15, 23, 42, 0.7);
+}
+
+.footer-tip {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.footer-tip kbd {
+  background: rgba(255, 255, 255, 0.1);
+  color: #cbd5e1;
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  font-family: inherit;
+}
+
+.modal-action-btn {
+  padding: 7px 18px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #f1f5f9;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.modal-action-btn:hover {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+/* 地图选中点位图钉标记样式 */
+::v-deep .radar-clicked-point-pin {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+::v-deep .pin-pulse {
+  position: absolute;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid #ef4444;
+  animation: pin-pulse-anim 1.8s infinite cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes pin-pulse-anim {
+  0% {
+    transform: scale(0.6);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+}
+
+::v-deep .pin-cross {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ef4444;
+  box-shadow: 0 0 0 2px #ffffff, 0 0 8px rgba(239, 68, 68, 0.8);
+}
+
+/* RGBA 原始通道解析表样式 */
+.rgba-table-wrapper {
+  margin-top: 6px;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.rgba-table-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #e2e8f0;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rgba-detail-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.rgba-detail-table th {
+  text-align: left;
+  padding: 5px 8px;
+  background: rgba(30, 41, 59, 0.6);
+  color: #94a3b8;
+  font-weight: 600;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.rgba-detail-table td {
+  padding: 6px 8px;
+  color: #cbd5e1;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  vertical-align: middle;
+}
+
+.rgba-detail-table tr:last-child td {
+  border-bottom: none;
+}
+
+.rgba-detail-table tr.ch-row-highlight {
+  background: rgba(56, 189, 248, 0.08);
+}
+
+.ch-badge {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 700;
+  font-size: 10px;
+  font-family: 'JetBrains Mono', Consolas, Monaco, monospace;
+}
+
+.ch-r {
+  background: rgba(239, 68, 68, 0.2);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+}
+
+.ch-g {
+  background: rgba(34, 197, 94, 0.2);
+  color: #4ade80;
+  border: 1px solid rgba(34, 197, 94, 0.35);
+}
+
+.ch-b {
+  background: rgba(59, 130, 246, 0.2);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.35);
+}
+
+.ch-a {
+  background: rgba(168, 85, 247, 0.2);
+  color: #c084fc;
+  border: 1px solid rgba(168, 85, 247, 0.35);
+}
+
+.ch-val {
+  font-weight: 700;
+  font-family: 'JetBrains Mono', Consolas, Monaco, monospace;
+}
+
+/* 灰度区间映射速查表专属样式 */
+.range-table-wrapper {
+  margin-top: 10px;
+}
+
+.range-detail-table th {
+  white-space: nowrap;
+}
+
+.range-detail-table td {
+  padding: 7px 8px;
+  vertical-align: middle;
+}
+
+.range-code-badge {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', Consolas, Monaco, monospace;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.dbz-badge {
+  background: rgba(56, 189, 248, 0.12);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.25);
+}
+
+.type-badge {
+  background: rgba(236, 72, 153, 0.12);
+  color: #f472b6;
+  border: 1px solid rgba(236, 72, 153, 0.25);
+}
+
+.code-number-pill {
+  display: inline-block;
+  font-family: 'JetBrains Mono', Consolas, Monaco, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  background: rgba(168, 85, 247, 0.15);
+  color: #c084fc;
+  border: 1px solid rgba(168, 85, 247, 0.3);
+  padding: 1px 7px;
+  border-radius: 4px;
+}
+
+.range-desc-text {
+  font-weight: 600;
+  color: #f1f5f9;
+}
+
+.num-cyan-sub {
+  color: #7dd3fc;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.feature-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  line-height: 1.4;
+}
+
+.hit-indicator-pill {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 4px;
+  letter-spacing: 0.2px;
+}
+
+.hit-pill-cyan {
+  background: rgba(56, 189, 248, 0.22);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.5);
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.35);
+}
+
+.hit-pill-pink {
+  background: rgba(236, 72, 153, 0.22);
+  color: #f472b6;
+  border: 1px solid rgba(236, 72, 153, 0.5);
+  box-shadow: 0 0 10px rgba(236, 72, 153, 0.35);
+}
+
+/* 动态命中高亮行 */
+.range-detail-table tr.row-active-hit.hit-dbz {
+  background: rgba(56, 189, 248, 0.16) !important;
+  box-shadow: inset 3px 0 0 #38bdf8;
+}
+
+.range-detail-table tr.row-active-hit.hit-type {
+  background: rgba(236, 72, 153, 0.16) !important;
+  box-shadow: inset 3px 0 0 #ec4899;
+}
+
+.range-detail-table tr.row-active-hit td {
+  color: #f8fafc !important;
+  font-weight: 600;
+}
+
+/* 弹窗内相态胶囊色彩统一 */
+.range-detail-table .capsule-type-tag {
+  margin-left: 0;
+}
+
+.range-detail-table .capsule-type-tag.type-10 {
+  background: rgba(14, 165, 233, 0.2);
+  color: #38bdf8;
+  border-color: rgba(56, 189, 248, 0.4);
+}
+
+.range-detail-table .capsule-type-tag.type-30 {
+  background: rgba(99, 102, 241, 0.2);
+  color: #818cf8;
+  border-color: rgba(99, 102, 241, 0.4);
+}
+
+.range-detail-table .capsule-type-tag.type-40 {
+  background: rgba(239, 68, 68, 0.2);
+  color: #f87171;
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+.range-detail-table .capsule-type-tag.type-50 {
+  background: rgba(217, 70, 239, 0.2);
+  color: #e879f9;
+  border-color: rgba(217, 70, 239, 0.4);
+}
+
+.range-detail-table .capsule-type-tag.type-60 {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fbbf24;
+  border-color: rgba(245, 158, 11, 0.4);
+}
+
+.range-detail-table .capsule-type-tag.type-70 {
+  background: rgba(20, 184, 166, 0.2);
+  color: #2dd4bf;
+  border-color: rgba(20, 184, 166, 0.4);
+}
+
+/* 核心算法推导与物理公式卡片样式 */
+.data-label-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.calc-method-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', Consolas, Monaco, monospace;
+}
+
+.calc-method-badge.method-gold {
+  background: rgba(251, 191, 36, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(251, 191, 36, 0.35);
+}
+
+.calc-method-badge.method-cyan {
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.35);
+}
+
+.calc-formula-card {
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.calc-formula-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #e2e8f0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.formula-icon {
+  font-size: 14px;
+}
+
+.formula-block {
+  background: rgba(30, 41, 59, 0.55);
+  border-radius: 6px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.formula-dbz-block {
+  border-left: 3px solid #fbbf24;
+}
+
+.formula-rain-block {
+  border-left: 3px solid #38bdf8;
+}
+
+.formula-block-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.formula-head-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.formula-num-badge {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.formula-num-badge.badge-gold {
+  background: #fbbf24;
+  color: #0f172a;
+}
+
+.formula-num-badge.badge-cyan {
+  background: #38bdf8;
+  color: #0f172a;
+}
+
+.formula-target-name {
+  font-size: 11px;
+  font-weight: 700;
+  color: #f1f5f9;
+}
+
+.formula-type-tag {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #94a3b8;
+  font-family: 'JetBrains Mono', Consolas, Monaco, monospace;
+}
+
+.formula-block-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.formula-math-line {
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 4px;
+  padding: 5px 8px;
+  font-family: 'JetBrains Mono', Consolas, Monaco, monospace;
+  font-size: 11px;
+  color: #f8fafc;
+  line-height: 1.5;
+}
+
+.formula-desc-text {
+  font-size: 11px;
+  color: #cbd5e1;
+  line-height: 1.45;
+}
+
+.formula-desc-text code {
+  background: rgba(255, 255, 255, 0.08);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  color: #fbbf24;
+}
+
+.num-rain-rate {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+}
+
+.unit-divider {
+  color: #64748b;
+  font-size: 11px;
+  margin: 0 4px;
+  font-weight: normal;
+}
+
+.num-inch {
+  color: #38bdf8;
+  font-weight: 700;
+}
+
+.sub-inch-text {
+  font-size: 10px;
+  color: #94a3b8;
+  font-weight: normal;
+  font-family: 'JetBrains Mono', Consolas, Monaco, monospace;
 }
 </style>

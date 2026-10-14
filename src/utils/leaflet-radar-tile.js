@@ -34,6 +34,19 @@ export function dbzToRainRate(dbz) {
 }
 
 /**
+ * 将毫米/小时 (mm/h) 换算为英制英寸/小时 (in/h)
+ * 国际标准: 1 inch = 25.4 mm
+ * @param {number} mmH
+ * @returns {number} in/h
+ */
+export function mmhToInh(mmH) {
+  if (!mmH || mmH <= 0) return 0;
+  const inH = mmH / 25.4;
+  // 若雨强较小 (< 0.1 in/h)，保留 3 位小数 (如 0.004 in/h, 0.02 in/h)；较大时保留 2 位小数
+  return inH < 0.1 ? Math.round(inH * 1000) / 1000 : Math.round(inH * 100) / 100;
+}
+
+/**
  * 获取降雨等级中文描述
  * @param {number} dbz
  */
@@ -53,29 +66,29 @@ export function getRainIntensityDesc(dbz) {
  */
 export function parsePrecipitationType(pType) {
   if (!pType || pType < 15) {
-    return { code: 10, desc: "降雨", isStorm: false, isSnow: false };
+    return { code: 10, desc: "降雨", isStorm: false, isSnow: false, range: "0 ~ 14" };
   }
-  // Ventusky 官方: 35 <= c < 45 为雷暴强对流 (内部代号 33)
+  // Ventusky 官方: 35 <= c < 45 为雷暴强对流 (灰度区间中心 40)
   if (pType >= 35 && pType < 45) {
-    return { code: 30, desc: "雷暴", isStorm: true, isSnow: false };
+    return { code: 40, desc: "雷暴", isStorm: true, isSnow: false, range: "35 ~ 44" };
   }
-  // Ventusky 官方: 15 <= c < 35 为降雪 (内部代号 65)
+  // Ventusky 官方: 15 <= c < 35 为降雪 (灰度区间中心 30)
   if (pType >= 15 && pType < 35) {
-    return { code: 40, desc: "降雪", isStorm: false, isSnow: true };
+    return { code: 30, desc: "降雪", isStorm: false, isSnow: true, range: "15 ~ 34" };
   }
-  // Ventusky 官方: 45 <= c < 55 为冻雨 (内部代号 129)
+  // Ventusky 官方: 45 <= c < 55 为冻雨 (灰度区间中心 50)
   if (pType >= 45 && pType < 55) {
-    return { code: 50, desc: "冻雨", isStorm: false, isSnow: false };
+    return { code: 50, desc: "冻雨", isStorm: false, isSnow: false, range: "45 ~ 54" };
   }
-  // Ventusky 官方: 55 <= c < 65 为冰雹
+  // Ventusky 官方: 55 <= c < 65 为冰雹 (灰度区间中心 60)
   if (pType >= 55 && pType < 65) {
-    return { code: 60, desc: "冰雹", isStorm: true, isSnow: false };
+    return { code: 60, desc: "冰雹", isStorm: true, isSnow: false, range: "55 ~ 64" };
   }
-  // Ventusky 官方: 65 <= c 为雨夹雪/阵雨/雾 (内部代号 17)
+  // Ventusky 官方: 65 <= c 为雨夹雪/阵雨/雾 (灰度区间 70+)
   if (pType >= 65) {
-    return { code: 70, desc: "雨夹雪", isStorm: false, isSnow: true };
+    return { code: 70, desc: "雨夹雪", isStorm: false, isSnow: true, range: "≥ 65" };
   }
-  return { code: 10, desc: "降雨", isStorm: false, isSnow: false };
+  return { code: 10, desc: "降雨", isStorm: false, isSnow: false, range: "0 ~ 14" };
 }
 
 
@@ -1238,16 +1251,192 @@ L.RadarTileLayer = (L.GridLayer ? L.GridLayer : L.Class).extend({
     if (roundedDbz <= 0) return null;
 
     const rainRate = dbzToRainRate(roundedDbz);
+    const rainRateInH = mmhToInh(rainRate);
     const desc = getRainIntensityDesc(roundedDbz);
 
     return {
       dbz: roundedDbz,
       rainRate,
+      rainRateInH,
       desc,
       type: pInfo.code,
       typeDesc: pInfo.desc,
       isStorm: pInfo.isStorm,
       isSnow: pInfo.isSnow,
+    };
+  },
+
+  /**
+   * 供地图点击后获取该经纬度对应的双灰度切片 (dBZ 与相态类型) 的超详细底层元数据与计算值
+   * 包含：原始单通道像素 Byte (0-255)、经纬度、矩阵行列坐标、切片行列号、在切片内的相对偏移百分比、真实切片URL与文件名等
+   * @param {number} lat 纬度
+   * @param {number} lon 经度
+   * @returns {Object|null}
+   */
+  getDetailedPointInfo(lat, lon) {
+    if (!this._isLoaded || !this._rawGrid) {
+      return null;
+    }
+
+    const bounds = this._dataBounds || { west: -180, east: 180, south: -90, north: 90 };
+    if (lat < bounds.south || lat > bounds.north) {
+      return null;
+    }
+
+    let normLon = ((((lon + 180) % 360) + 360) % 360) - 180;
+    if (normLon < bounds.west || normLon > bounds.east) {
+      return null;
+    }
+
+    const w = this._gridWidth;
+    const h = this._gridHeight;
+    const lonSpan = bounds.east - bounds.west;
+    const latSpan = bounds.north - bounds.south;
+
+    const fi = ((normLon - bounds.west) / lonSpan) * (w - 1);
+    const fj = ((bounds.north - lat) / latSpan) * (h - 1);
+
+    const pixelX = Math.max(0, Math.min(Math.round(fi), w - 1));
+    const pixelY = Math.max(0, Math.min(Math.round(fj), h - 1));
+
+    const i0 = Math.max(0, Math.min(Math.floor(fi), w - 2));
+    const j0 = Math.max(0, Math.min(Math.floor(fj), h - 2));
+    const dx = fi - i0;
+    const dy = fj - j0;
+
+    const rawDbz = this._rawGrid ? this._rawGrid[pixelY * w + pixelX] : 0;
+    const rawType = this._typeGrid ? this._typeGrid[pixelY * w + pixelX] : 0;
+    const pInfo = parsePrecipitationType(rawType);
+
+    const v00 = this._rawGrid[j0 * w + i0];
+    const v10 = this._rawGrid[j0 * w + i0 + 1];
+    const v01 = this._rawGrid[(j0 + 1) * w + i0];
+    const v11 = this._rawGrid[(j0 + 1) * w + i0 + 1];
+
+    const dbzInterp =
+      v00 * (1 - dx) * (1 - dy) +
+      v10 * dx * (1 - dy) +
+      v01 * (1 - dx) * dy +
+      v11 * dx * dy;
+
+    const roundedDbz = Math.max(0, Math.round(dbzInterp * 10) / 10);
+    const rainRate = dbzToRainRate(roundedDbz);
+    const rainRateInH = mmhToInh(rainRate);
+    const desc = getRainIntensityDesc(roundedDbz);
+    const linearZ = Math.round(Math.pow(10, roundedDbz / 10) * 10) / 10;
+
+    const config = this._regionalConfig || {};
+    const model = config.model || config.mode || "worad_hres";
+    const defaultTime = getRecentRadarTime();
+    const dateStr = config.dateStr || defaultTime.dateStr;
+    const hourStr = config.hourStr || defaultTime.hourStr;
+    const timeStr = config.timeStr || defaultTime.timeStr;
+    const proxyPrefix = config.proxyPrefix || "/ventusky-api";
+
+    const tileW = this._tileW || (model === "worad_hres" ? 320 : 256);
+    const tileH = this._tileH || (model === "worad_hres" ? 262 : 265);
+
+    let tileX = 0;
+    let tileY = 0;
+    let inTileX = 0;
+    let inTileY = 0;
+    let inTilePercentX = 0;
+    let inTilePercentY = 0;
+    let dbzUrl = "";
+    let typeUrl = "";
+    let dbzDirectUrl = "";
+    let typeDirectUrl = "";
+    let dbzFileName = "";
+    let typeFileName = "";
+
+    // 判断当前处于瓦片切片模式还是整张全景模式
+    const isTiled = this._isRegionalMode || (this._map && this._map.getZoom() >= 5);
+    if (isTiled && this._tileW && this._tileH) {
+      tileX = Math.floor(pixelX / tileW);
+      tileY = Math.floor(pixelY / tileH);
+      inTileX = pixelX - tileX * tileW;
+      inTileY = pixelY - tileY * tileH;
+      inTilePercentX = Math.round((inTileX / tileW) * 1000) / 10;
+      inTilePercentY = Math.round((inTileY / tileH) * 1000) / 10;
+
+      dbzFileName = `${model}_srazky_dbz_${tileX}_${tileY}_${timeStr}.jpg`;
+      typeFileName = `${model}_srazky_type_dbz_${tileX}_${tileY}_${timeStr}.jpg`;
+
+      const subPathDbz = `${dateStr}/${model}/tilled_world/hour_${hourStr}/${dbzFileName}`;
+      const subPathType = `${dateStr}/${model}/tilled_world/hour_${hourStr}/${typeFileName}`;
+      dbzUrl = `${proxyPrefix}/${subPathDbz}?model=${model}&x=${tileX}&y=${tileY}&hour=${hourStr}&time=${timeStr}&type=dbz`;
+      typeUrl = `${proxyPrefix}/${subPathType}?model=${model}&x=${tileX}&y=${tileY}&hour=${hourStr}&time=${timeStr}&type=type`;
+      dbzDirectUrl = `https://data.ventusky.com/${subPathDbz}`;
+      typeDirectUrl = `https://data.ventusky.com/${subPathType}`;
+    } else {
+      tileX = 0;
+      tileY = 0;
+      inTileX = pixelX;
+      inTileY = pixelY;
+      inTilePercentX = Math.round((pixelX / w) * 1000) / 10;
+      inTilePercentY = Math.round((pixelY / h) * 1000) / 10;
+
+      dbzFileName = `${model}_srazky_dbz_${timeStr}.jpg`;
+      typeFileName = `${model}_srazky_type_dbz_${timeStr}.jpg`;
+
+      const subPathDbz = `${dateStr}/${model}/whole_world/hour_${hourStr}/${dbzFileName}`;
+      const subPathType = `${dateStr}/${model}/whole_world/hour_${hourStr}/${typeFileName}`;
+      dbzUrl = `${proxyPrefix}/${subPathDbz}?model=${model}&scope=whole_world&hour=${hourStr}&time=${timeStr}&layer=dbz`;
+      typeUrl = `${proxyPrefix}/${subPathType}?model=${model}&scope=whole_world&hour=${hourStr}&time=${timeStr}&layer=type`;
+      dbzDirectUrl = `https://data.ventusky.com/${subPathDbz}`;
+      typeDirectUrl = `https://data.ventusky.com/${subPathType}`;
+    }
+
+    return {
+      model,
+      modelName: config.name || (model === "earad" ? "东亚 2km" : model === "eurad" ? "欧洲 2km" : model === "usrad" ? "北美 2km" : "全球 6km"),
+      lat: Math.round(lat * 10000) / 10000,
+      lng: Math.round(normLon * 10000) / 10000,
+      gridWidth: w,
+      gridHeight: h,
+      pixelX,
+      pixelY,
+      tileX,
+      tileY,
+      tileW,
+      tileH,
+      inTileX,
+      inTileY,
+      inTilePercentX,
+      inTilePercentY,
+      rawDbz,
+      rgbaDbz: { r: rawDbz, g: rawDbz, b: rawDbz, a: 255 },
+      dbz: roundedDbz,
+      rainRate,
+      rainRateInH,
+      desc,
+      linearZ,
+      interpDetail: {
+        v00,
+        v10,
+        v01,
+        v11,
+        dx: Math.round(dx * 100) / 100,
+        dy: Math.round(dy * 100) / 100,
+        rawCalc: Math.round(dbzInterp * 100) / 100,
+      },
+      rawType,
+      rgbaType: { r: rawType, g: rawType, b: rawType, a: 255 },
+      type: pInfo.code,
+      typeDesc: pInfo.desc,
+      typeRange: pInfo.range,
+      isStorm: pInfo.isStorm,
+      isSnow: pInfo.isSnow,
+      dbzUrl,
+      typeUrl,
+      dbzDirectUrl,
+      typeDirectUrl,
+      dbzFileName,
+      typeFileName,
+      timeStr,
+      dateStr,
+      hourStr,
+      isTiled,
     };
   },
 });
