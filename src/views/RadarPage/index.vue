@@ -1751,7 +1751,10 @@ export default {
     },
 
     /**
-     * 判断相态速查表中某一行是否命中当前选中点位 (0~255 单通道灰度)
+     * 判断气象相态速查表中某一行是否命中当前选中点位
+     * 判定准则：比较点位单通道原始灰度字节 rawType (0~255) 是否落在当前相态的闭区间 [item.min, item.max] 内
+     * @param {Object} item 相态区间条目 (如 { min: 35, max: 44, desc: '雷暴', code: 40 })
+     * @returns {boolean} 是否当前命中
      */
     isPhaseRowActive(item) {
       if (!this.pointModalData) return false;
@@ -1760,7 +1763,10 @@ export default {
     },
 
     /**
-     * 判断 dBZ 回波速查表中某一行是否命中当前选中点位
+     * 判断 dBZ 回波反射率速查表中某一行是否命中当前选中点位
+     * 判定准则：比较点位原始回波灰度 rawDbz 或四舍五入后的物理反射率是否落在区间 [item.min, item.max] 内
+     * @param {Object} item dBZ 强度区间条目 (如 { min: 10, max: 19, desc: '微量毛毛雨' })
+     * @returns {boolean} 是否当前命中
      */
     isDbzRowActive(item) {
       if (!this.pointModalData) return false;

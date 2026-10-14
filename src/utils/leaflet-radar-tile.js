@@ -22,27 +22,38 @@ export const VENTUSKY_RADAR_COLORS = [
 ];
 
 /**
- * 根据反射率 dBZ 估算降水强度 (Marshall-Palmer 经典公式 Z = 200 * R^1.6)
- * @param {number} dbz
- * @returns {number} mm/h
+ * 根据雷达反射率 (dBZ) 估算地面降水强度 (Rain Rate)
+ * 采用国际气象学经典的马歇尔-帕尔默公式 (Marshall-Palmer Z-R Relationship, 1948)
+ * 物理背景：雷达发射电磁波探测空中降水粒子，测得反射率因子 Z (单位: mm^6/m^3)，
+ * 对数形式即为 dBZ = 10 * log10(Z)。
+ * 地面雨量实测经验动力学方程为: Z = a * R^b
+ * 国际气象组织 (WMO) 与 Ventusky 官方在常规层状云降水下采用标准经验参数: a = 200, b = 1.6
+ * 即: Z = 200 * R^1.6  =>  反解地面雨强: R = (Z / 200)^(1 / 1.6)
+ *
+ * @param {number} dbz 物理反射率强度 (dBZ)
+ * @returns {number} 地面降雨强度 (mm/h, 保留 1 位小数)
  */
 export function dbzToRainRate(dbz) {
   if (!dbz || dbz < 5) return 0;
+  // 步骤 1: 将对数单位 dBZ 转回线性雷达反射率因子 Z (mm^6/m^3)
   const z = Math.pow(10, dbz / 10);
+  // 步骤 2: 代入 Marshall-Palmer 经验公式反解雨强 R (mm/h)
   const r = Math.pow(z / 200, 1 / 1.6);
+  // 保留 1 位小数输出
   return Math.round(r * 10) / 10;
 }
 
 /**
- * 将毫米/小时 (mm/h) 换算为英制英寸/小时 (in/h)
- * 国际标准: 1 inch = 25.4 mm
- * @param {number} mmH
- * @returns {number} in/h
+ * 将公制降水强度毫米/小时 (mm/h) 换算为英制英寸/小时 (in/h)
+ * 国际换算基准: 1 inch = 25.4 mm => in/h = mm/h / 25.4
+ * 精度策略: 小于 0.1 in/h 的微量降水保留 3 位小数 (如 0.004 in/h, 0.02 in/h)；中大雨保留 2 位小数
+ *
+ * @param {number} mmH 公制降水强度 (mm/h)
+ * @returns {number} 英制降水强度 (in/h)
  */
 export function mmhToInh(mmH) {
   if (!mmH || mmH <= 0) return 0;
   const inH = mmH / 25.4;
-  // 若雨强较小 (< 0.1 in/h)，保留 3 位小数 (如 0.004 in/h, 0.02 in/h)；较大时保留 2 位小数
   return inH < 0.1 ? Math.round(inH * 1000) / 1000 : Math.round(inH * 100) / 100;
 }
 
@@ -1293,32 +1304,41 @@ L.RadarTileLayer = (L.GridLayer ? L.GridLayer : L.Class).extend({
     const lonSpan = bounds.east - bounds.west;
     const latSpan = bounds.north - bounds.south;
 
+    // 1. 将规范化经纬度投影到源网格矩阵的连续浮点像素坐标 (fi, fj)
     const fi = ((normLon - bounds.west) / lonSpan) * (w - 1);
     const fj = ((bounds.north - lat) / latSpan) * (h - 1);
 
+    // 2. 最近邻取整坐标 (pixelX, pixelY)：用于准确定位图像切片中该点落入的单像素物理字节
     const pixelX = Math.max(0, Math.min(Math.round(fi), w - 1));
     const pixelY = Math.max(0, Math.min(Math.round(fj), h - 1));
 
+    // 3. 四邻域网格基准索引 (i0, j0) 与水平/垂直浮点偏移权重 (dx, dy, 范围 0.0 ~ 1.0)
     const i0 = Math.max(0, Math.min(Math.floor(fi), w - 2));
     const j0 = Math.max(0, Math.min(Math.floor(fj), h - 2));
     const dx = fi - i0;
     const dy = fj - j0;
 
+    // 4. 提取当前点位的底层离散灰度字节原始值 (Uint8: 0 ~ 255)
+    // 注意：相态 (Type) 为离散枚举分类编码（如 30:雪, 40:雷暴），严禁插值，必须直接取离散单点值
     const rawDbz = this._rawGrid ? this._rawGrid[pixelY * w + pixelX] : 0;
     const rawType = this._typeGrid ? this._typeGrid[pixelY * w + pixelX] : 0;
     const pInfo = parsePrecipitationType(rawType);
 
+    // 5. 提取经纬度周围 4 个相邻像素顶点的原始灰度值 (左上 v00, 右上 v10, 左下 v01, 右下 v11)
     const v00 = this._rawGrid[j0 * w + i0];
     const v10 = this._rawGrid[j0 * w + i0 + 1];
     const v01 = this._rawGrid[(j0 + 1) * w + i0];
     const v11 = this._rawGrid[(j0 + 1) * w + i0 + 1];
 
+    // 6. 执行四邻域双线性空间插值 (Bilinear Interpolation)
+    // 目的：气象连续物理场在空间上平滑渐变，通过距离加权平均消除图像离散网格的马赛克阶梯感
     const dbzInterp =
       v00 * (1 - dx) * (1 - dy) +
       v10 * dx * (1 - dy) +
       v01 * (1 - dx) * dy +
       v11 * dx * dy;
 
+    // 7. 物理反射率保留 1 位小数，并依此反演公制与英制地面降水强度 (Rain Rate)
     const roundedDbz = Math.max(0, Math.round(dbzInterp * 10) / 10);
     const rainRate = dbzToRainRate(roundedDbz);
     const rainRateInH = mmhToInh(rainRate);
