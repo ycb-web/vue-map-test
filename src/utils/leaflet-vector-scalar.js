@@ -710,6 +710,9 @@ L.ScalarTileLayer = (L.GridLayer ? L.GridLayer : L.Class).extend({
       var vData = vComp.data;
       currentWindData = uData.map(function (u, i) {
         var v = vData[i];
+        if (!µ.isValue(u) || !µ.isValue(v) || isNaN(u) || isNaN(v)) {
+          return null;
+        }
         return Math.sqrt(u * u + v * v);
       });
     } else {
@@ -870,7 +873,14 @@ L.ScalarTileLayer = (L.GridLayer ? L.GridLayer : L.Class).extend({
   },
 
   _getColor: function (value) {
-    if (!µ.isValue(value)) {
+    if (!µ.isValue(value) || isNaN(value)) {
+      return this._transparentBlack;
+    }
+    // 关键拦截：低于色阶下限阈值(如陆地0或微弱风速)，严格返回完全透明，严禁着色底色
+    if (
+      typeof this.options.minValue === "number" &&
+      value < this.options.minValue
+    ) {
       return this._transparentBlack;
     }
     var color = this._colorScale(value, this._overlayAlpha);
@@ -3166,9 +3176,33 @@ L.VectorArrowLayer = L.CanvasLayer.extend({
   setData: function (data) {
     this.data = data;
     if (data && data.length >= 2) {
-      this.header = data[0].header;
-      this.uData = data[0].data;
-      this.vData = data[1].data;
+      // 健壮提取 u 与 v：优先通过 parameterNumber / parameterNumberName 匹配
+      var uRecord = data.find(function (r) {
+        return (
+          r.header &&
+          (r.header.parameterNumber === 2 ||
+            r.header.parameterNumberName === "u10" ||
+            r.header.parameterNumberName === "u")
+        );
+      });
+      var vRecord = data.find(function (r) {
+        return (
+          r.header &&
+          (r.header.parameterNumber === 3 ||
+            r.header.parameterNumberName === "v10" ||
+            r.header.parameterNumberName === "v")
+        );
+      });
+
+      if (uRecord && vRecord) {
+        this.header = uRecord.header;
+        this.uData = uRecord.data;
+        this.vData = vRecord.data;
+      } else {
+        this.header = data[0].header;
+        this.uData = data[0].data;
+        this.vData = data[1].data;
+      }
     }
     this.needRedraw();
   },
@@ -3468,9 +3502,32 @@ L.VectorWaveLayer = L.CanvasLayer.extend({
   setData: function (data) {
     this.data = data;
     if (data && data.length >= 2) {
-      this.header = data[0].header;
-      this.uData = data[0].data;
-      this.vData = data[1].data;
+      var uRecord = data.find(function (r) {
+        return (
+          r.header &&
+          (r.header.parameterNumber === 2 ||
+            r.header.parameterNumberName === "u10" ||
+            r.header.parameterNumberName === "u")
+        );
+      });
+      var vRecord = data.find(function (r) {
+        return (
+          r.header &&
+          (r.header.parameterNumber === 3 ||
+            r.header.parameterNumberName === "v10" ||
+            r.header.parameterNumberName === "v")
+        );
+      });
+
+      if (uRecord && vRecord) {
+        this.header = uRecord.header;
+        this.uData = uRecord.data;
+        this.vData = vRecord.data;
+      } else {
+        this.header = data[0].header;
+        this.uData = data[0].data;
+        this.vData = data[1].data;
+      }
     }
     this._wavePoints = []; // 清除缓存，下次绘制时重新采样
     this.needRedraw();
@@ -3707,14 +3764,8 @@ L.WaveParticleLayer = L.Layer.extend({
   },
   _clearAndRestart: function () {
     if (this._context) this._context.clearRect(0, 0, 3000, 3000);
-    var c = document.querySelector(".wave-particle-overlay");
-    if (c) c.style.visibility = "hidden";
     var self = this;
-    setTimeout(function () {
-      if (self._engine) self._startEngine();
-      var c = document.querySelector(".wave-particle-overlay");
-      if (c) c.style.visibility = "visible";
-    }, 100);
+    if (self._engine) self._startEngine();
   },
   _clear: function () {
     if (this._engine) this._engine.stop();

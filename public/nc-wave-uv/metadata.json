@@ -1,0 +1,61 @@
+{
+  "dataset": "Marine Numerical Wave Forecast (South China Sea)",
+  "type": "wave",
+  "format": "RGBA PNG Slices",
+  "bounds": {
+    "west": 105.0,
+    "east": 121.5,
+    "south": 15.0,
+    "north": 25.5
+  },
+  "grid": {
+    "width": 221,
+    "height": 141,
+    "resLon": 0.075,
+    "resLat": 0.075,
+    "totalPoints": 31161
+  },
+  "channels": {
+    "R": {
+      "variable": "wave_u",
+      "name": "海浪东西向经向分量 (West to East)",
+      "unit": "m",
+      "scale": 0.05,
+      "offset": 128,
+      "formula": "value = (R - offset) * scale",
+      "min": -6.4,
+      "max": 6.3500000000000005
+    },
+    "G": {
+      "variable": "wave_v",
+      "name": "海浪南北向纬向分量 (South to North)",
+      "unit": "m",
+      "scale": 0.05,
+      "offset": 128,
+      "formula": "value = (G - offset) * scale",
+      "min": -6.4,
+      "max": 6.3500000000000005
+    },
+    "B": {
+      "variable": "hs",
+      "name": "有效波高 / 显著波高 (Significant Wave Height)",
+      "unit": "m",
+      "scale": 0.05,
+      "offset": 0,
+      "formula": "value = B * scale",
+      "min": 0.0,
+      "max": 12.75
+    },
+    "A": {
+      "name": "海陆与缺测掩膜 (Sea/Land Mask)",
+      "seaValue": 255,
+      "landValue": 0,
+      "description": "255 表示海洋有效数据，0 表示陆地掩膜或缺测点"
+    }
+  },
+  "frames": {
+    "total": 120,
+    "namingPattern": "wave_uv_{hour:03d}.png",
+    "intervalHours": 1
+  }
+}

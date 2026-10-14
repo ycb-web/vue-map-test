@@ -19,7 +19,7 @@ Vue.use(VueRouter);
 const routes = [
   {
     path: "/",
-    redirect: "/radar",
+    redirect: "/nc-wind-range",
   },
   {
     path: "/radar",
@@ -145,6 +145,42 @@ const routes = [
     meta: {
       title: "海浪等值面 - Vue地图可视化工具",
       description: "海浪有效波高等值面与色斑图层展示"
+    },
+  },
+  {
+    path: "/nc-wind-range",
+    name: "NcWindRange",
+    component: () => import("../views/NcWindRangePage/index.vue"),
+    meta: {
+      title: "NC大面风场范围 - Vue地图可视化工具",
+      description: "NC风浪大面预报数据源覆盖范围与网格边界可视化"
+    },
+  },
+  {
+    path: "/nc-wave-range",
+    name: "NcWaveRange",
+    component: () => import("../views/NcWaveRangePage/index.vue"),
+    meta: {
+      title: "NC大面浪场范围 - Vue地图可视化工具",
+      description: "NC海浪大面预报有效波高与浪向动态推进可视化"
+    },
+  },
+  {
+    path: "/nc-wave-clip",
+    name: "NcWaveClip",
+    component: () => import("../views/NcWaveClipPage/index.vue"),
+    meta: {
+      title: "NC浪场(矢量裁剪对比) - Vue地图可视化工具",
+      description: "基于后端提供的海岸线 GeoJSON 进行数据裁剪与多缩放级别偏差对比"
+    },
+  },
+  {
+    path: "/backend-nc-preview",
+    name: "BackendNcPreview",
+    component: () => import("../views/BackendNcPreviewPage/index.vue"),
+    meta: {
+      title: "后端切片实测 - Vue地图可视化工具",
+      description: "后端转换生成的NC灰度切片体检与现场等值面算力实测"
     },
   },
   {

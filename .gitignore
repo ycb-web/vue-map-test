@@ -27,3 +27,14 @@ yarn-error.log*
 *.sw?
 
 /triangle-layer
+
+# Large dataset & temporary testing directories
+nc-灰度图/
+nc-灰度图
+tmp_backend_test/
+cache_tianditu_tiles/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class

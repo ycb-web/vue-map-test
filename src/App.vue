@@ -1,6 +1,10 @@
 <template>
   <div id="app">
     <nav class="nav-bar">
+      <router-link to="/nc-wind-range" class="nav-link">NC风场范围</router-link>
+      <router-link to="/nc-wave-range" class="nav-link">NC浪场范围</router-link>
+      <router-link to="/nc-wave-clip" class="nav-link">NC浪场(矢量裁剪对比)</router-link>
+      <router-link to="/backend-nc-preview" class="nav-link">后端切片测试</router-link>
       <router-link to="/radar" class="nav-link">天气雷达</router-link>
       <router-link to="/wave" class="nav-link">海浪等值面</router-link>
       <router-link to="/dayabay-flow" class="nav-link">大亚湾流场</router-link>

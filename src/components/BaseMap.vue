@@ -1,6 +1,11 @@
 <template>
   <div class="base-map-wrapper">
-    <div :id="mapId" class="map-container"></div>
+    <div
+      :id="mapId"
+      class="map-container"
+      :class="{ 'transparent-ocean-mode': isTransparentOceanMode }"
+      :style="containerStyle"
+    ></div>
   </div>
 </template>
 
@@ -9,6 +14,24 @@ import L from "leaflet";
 
 // 内置底图枚举
 const BASEMAP_PRESETS = {
+  // 天地图矢量 (海陆分离/透明海洋：由 Python 代理服务端极速输出透明切片，原生 <img> GPU 硬件缩放)
+  tianditu_vec_transparent: {
+    isTransparentOcean: true,
+    url: "/api/tianditu-transparent/{z}/{x}/{y}.png",
+    options: {
+      maxZoom: 18,
+      pane: "landMaskPane",
+    },
+    annotation: {
+      url: "https://t{s}.tianditu.gov.cn/cva_w/wmts?tk={tk}&SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=cva&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TileMatrix={z}&TileCol={x}&TileRow={y}",
+      options: {
+        subdomains: ["0", "1", "2", "3", "4", "5", "6", "7"],
+        transparent: true,
+        zIndex: 3,
+        pane: "labelsPane",
+      },
+    },
+  },
   // 天地图影像
   tianditu_img: {
     url: "https://t{s}.tianditu.gov.cn/img_w/wmts?tk={tk}&SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=img&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TileMatrix={z}&TileCol={x}&TileRow={y}",
@@ -117,6 +140,21 @@ export default {
       type: Boolean,
       default: true,
     },
+    // 海洋背景底色 (在透明海模式下垫底，默认天地图纯正海洋色 #aac6ee)
+    oceanBackground: {
+      type: String,
+      default: "#aac6ee",
+    },
+  },
+  computed: {
+    isTransparentOceanMode() {
+      return this.basemap === "tianditu_vec_transparent";
+    },
+    containerStyle() {
+      return {
+        backgroundColor: this.oceanBackground || "transparent",
+      };
+    },
   },
   data() {
     return {
@@ -153,6 +191,20 @@ export default {
         mapOptions.zoom
       );
 
+      // 初始化专属 Pane 层级
+      // landMaskPane: zIndex 380 (高于波浪等值面 350，低于注记 400+)，让陆地压住岸上的浪，且事件穿透
+      if (!this.map.getPane("landMaskPane")) {
+        const landPane = this.map.createPane("landMaskPane");
+        landPane.style.zIndex = 380;
+        landPane.style.pointerEvents = "none";
+      }
+      // labelsPane: zIndex 400 (置顶地名注记与行政边界)，事件穿透
+      if (!this.map.getPane("labelsPane")) {
+        const lPane = this.map.createPane("labelsPane");
+        lPane.style.zIndex = 400;
+        lPane.style.pointerEvents = "none";
+      }
+
       // 添加底图
       this.setBasemap(this.basemap);
 
@@ -184,19 +236,20 @@ export default {
         url = url.replace(/{tk}/g, this.tiandituToken);
       }
 
+      // 添加底图 (原生 L.tileLayer，借助 GPU 显存做平滑硬件变换缩放，零闪烁)
       this.basemapLayer = L.tileLayer(url, preset.options);
       this.basemapLayer.addTo(this.map);
 
-      // 添加注记图层
+      // 添加注记图层 (置于 labelsPane，确保地名始终浮在最上层)
       if (this.showAnnotation && preset.annotation) {
         let annotationUrl = preset.annotation.url;
         if (annotationUrl.includes("{tk}")) {
           annotationUrl = annotationUrl.replace(/{tk}/g, this.tiandituToken);
         }
-        this.annotationLayer = L.tileLayer(
-          annotationUrl,
-          preset.annotation.options
-        );
+        this.annotationLayer = L.tileLayer(annotationUrl, {
+          pane: "labelsPane",
+          ...preset.annotation.options,
+        });
         this.annotationLayer.addTo(this.map);
       }
     },
@@ -300,6 +353,25 @@ export default {
       return Object.keys(BASEMAP_PRESETS);
     },
   },
+  watch: {
+    basemap(newVal) {
+      this.setBasemap(newVal);
+    },
+    showAnnotation(newVal) {
+      this.toggleAnnotation(newVal);
+    },
+    oceanBackground: {
+      handler(newVal) {
+        this.$nextTick(() => {
+          const el = document.getElementById(this.mapId);
+          if (el && newVal) {
+            el.style.setProperty("background-color", newVal, "important");
+          }
+        });
+      },
+      immediate: true,
+    },
+  },
 };
 </script>
 
@@ -314,5 +386,16 @@ export default {
   width: 100%;
   height: 100%;
   z-index: 1;
+  transition: background-color 0.25s ease;
+}
+
+::v-deep .leaflet-landMask-pane {
+  z-index: 380 !important;
+  pointer-events: none !important;
+}
+
+::v-deep .leaflet-labels-pane {
+  z-index: 400 !important;
+  pointer-events: none !important;
 }
 </style>

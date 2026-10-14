@@ -253,6 +253,12 @@ export default {
         const tk = "93724b915d1898d946ca7dc7b765dda5";
         return [
           {
+            name: "海陆分离(透明海)",
+            isTransparentOcean: true,
+            baseUrl: "/api/tianditu-transparent/{z}/{x}/{y}.png",
+            labelUrl: `https://t0.tianditu.gov.cn/cva_w/wmts?tk=${tk}&SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=cva&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TileMatrix={z}&TileCol={x}&TileRow={y}`,
+          },
+          {
             name: "电子地图",
             initSelect: true, // 默认选中
             baseUrl: `https://t0.tianditu.gov.cn/vec_w/wmts?tk=${tk}&SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=vec&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TileMatrix={z}&TileCol={x}&TileRow={y}`,
@@ -376,10 +382,18 @@ export default {
       if (!basemap) return;
 
       // 添加底图瓦片图层
-      this.baseLayer = L.tileLayer(basemap.baseUrl, {
+      var tileOptions = {
         maxZoom: 18,
         detectRetina: true,
-      });
+      };
+      if (basemap.isTransparentOcean) {
+        this.baseLayer = createTiandituTransparentOceanLayer(
+          basemap.baseUrl,
+          tileOptions
+        );
+      } else {
+        this.baseLayer = L.tileLayer(basemap.baseUrl, tileOptions);
+      }
       this.baseLayer.addTo(this.map);
       this.baseLayer.setZIndex(0);
 
@@ -502,10 +516,14 @@ export default {
       }
 
       // 添加新的底图图层
-      this.baseLayer = L.tileLayer(basemap.baseUrl, {
+      var newTileOptions = {
         maxZoom: 18,
         detectRetina: true,
-      });
+      };
+      if (basemap.isTransparentOcean && this.map.getPane && this.map.getPane("landMaskPane")) {
+        newTileOptions.pane = "landMaskPane";
+      }
+      this.baseLayer = L.tileLayer(basemap.baseUrl, newTileOptions);
       this.baseLayer.addTo(this.map);
       this.baseLayer.setZIndex(0);
 
