@@ -38,3 +38,6 @@ cache_tianditu_tiles/
 __pycache__/
 *.py[cod]
 *$py.class
+
+# Testing artifacts
+.playwright-cli/
