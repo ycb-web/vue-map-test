@@ -20,7 +20,7 @@ const BASEMAP_PRESETS = {
     url: "/api/tianditu-transparent/{z}/{x}/{y}.png",
     options: {
       maxZoom: 18,
-      pane: "landMaskPane",
+      pane: "landCoverPane",
     },
     annotation: {
       url: "https://t{s}.tianditu.gov.cn/cva_w/wmts?tk={tk}&SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=cva&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TileMatrix={z}&TileCol={x}&TileRow={y}",
@@ -28,7 +28,7 @@ const BASEMAP_PRESETS = {
         subdomains: ["0", "1", "2", "3", "4", "5", "6", "7"],
         transparent: true,
         zIndex: 3,
-        pane: "labelsPane",
+        pane: "mapLabelPane",
       },
     },
   },
@@ -191,17 +191,38 @@ export default {
         mapOptions.zoom
       );
 
-      // 初始化专属 Pane 层级
-      // landMaskPane: zIndex 380 (高于波浪等值面 350，低于注记 400+)，让陆地压住岸上的浪，且事件穿透
+      // 初始化专属 Pane 层级 (严格对齐 glcb-web 规范体系)
+      // 1. 等值面专属 Pane: zIndex 350 (高于底图瓦片 200，低于一切覆盖物)
+      if (!this.map.getPane("isosurfacePane")) {
+        const isoPane = this.map.createPane("isosurfacePane");
+        isoPane.style.zIndex = 350;
+      }
+      // 2. 粒子/矢量流场专属 Pane: zIndex 450 (高于等值面 350，低于特殊陆地图包，事件穿透)
+      if (!this.map.getPane("particlePane")) {
+        const pPane = this.map.createPane("particlePane");
+        pPane.style.zIndex = 450;
+        pPane.style.pointerEvents = "none";
+      }
+      // 3. 特殊陆地电子图包专属 Pane: zIndex 500 (位于浪图层 350~450 上方，陆地遮浪，海面透明透浪，低于注记与Marker)
+      if (!this.map.getPane("landCoverPane")) {
+        const lPane = this.map.createPane("landCoverPane");
+        lPane.style.zIndex = 500;
+        lPane.style.pointerEvents = "none";
+      }
       if (!this.map.getPane("landMaskPane")) {
         const landPane = this.map.createPane("landMaskPane");
-        landPane.style.zIndex = 380;
+        landPane.style.zIndex = 500;
         landPane.style.pointerEvents = "none";
       }
-      // labelsPane: zIndex 400 (置顶地名注记与行政边界)，事件穿透
+      // 4. 地图注记/标注专属 Pane: zIndex 550 (置顶地名注记与行政边界，位于陆地图包上方，文字永不被遮挡)
+      if (!this.map.getPane("mapLabelPane")) {
+        const lbPane = this.map.createPane("mapLabelPane");
+        lbPane.style.zIndex = 550;
+        lbPane.style.pointerEvents = "none";
+      }
       if (!this.map.getPane("labelsPane")) {
         const lPane = this.map.createPane("labelsPane");
-        lPane.style.zIndex = 400;
+        lPane.style.zIndex = 550;
         lPane.style.pointerEvents = "none";
       }
 

@@ -9,6 +9,9 @@
       @map-ready="onMapReady"
     />
 
+    <!-- 左下角悬浮标准波高图例 (完全对齐 glcb-web 业务规范) -->
+    <WindLegend mode="wave" class="floating-wave-legend" />
+
     <!-- 右上角控制器与参数看板 (海浪专业版) -->
     <div class="info-panel" :class="{ collapsed: panelCollapsed }">
       <div class="panel-header" @click="panelCollapsed = !panelCollapsed">
@@ -20,25 +23,36 @@
         <!-- 海浪图层控制 -->
         <div class="section-title">🎨 海浪叠加图层</div>
 
-        <!-- 1. 浪粒子图层 (波浪沿浪向真实推进) -->
+        <!-- 对照层直接插值同一帧标量网格，不经过等值面提取或几何平滑。 -->
         <div class="control-item">
           <label>
-            <input type="checkbox" v-model="showWaveParticle" @change="toggleWaveParticle" />
-            <span>浪粒子图层 (波峰短线动态推进)</span>
+            <input type="checkbox" v-model="showScalarField" @change="toggleScalarField" />
+            <span class="highlight-label">原始颜色面场（网格插值对照）</span>
           </label>
         </div>
-        <div v-if="showWaveParticle" class="sub-controls">
+        <div v-if="showScalarField" class="sub-controls">
           <div class="slider-row">
-            <span>推进速度: {{ waveSpeed.toFixed(3) }}</span>
+            <span>面场透明度: {{ scalarFieldOpacity.toFixed(2) }}</span>
             <input
               type="range"
-              min="0.002"
-              max="0.02"
-              step="0.001"
-              v-model.number="waveSpeed"
-              @input="updateWaveParticleSpeed"
+              min="0.1"
+              max="1"
+              step="0.05"
+              v-model.number="scalarFieldOpacity"
+              @input="updateScalarFieldOpacity"
             />
           </div>
+        </div>
+        <div class="control-item">
+          <label>
+            <input type="checkbox" v-model="correctContourOffset" @change="renderIsosurfaceLayer" />
+            <span>修正等值面半格偏移（0.0375°）</span>
+          </label>
+        </div>
+        <div class="tip-sub alignment-tip">
+          对照方法：分别开关颜色面场和等值面；平滑设为0排除边界收缩。
+          同时开启时等值面在上方，可降低其透明度并显示面边界线；也可关闭等值面填充，只叠加边界。
+          取消勾选半格修正可还原旧坐标；两层均使用同一帧网格，不做人工平移。
         </div>
 
         <!-- 1. 浪粒子图层 (波浪沿浪向真实推进) -->
@@ -80,6 +94,12 @@
               v-model.number="isosurfaceOpacity"
               @input="updateIsosurfaceStyle"
             />
+          </div>
+          <div class="control-row inline-row">
+            <label class="sub-checkbox">
+              <input type="checkbox" v-model="showIsosurfaceFill" @change="updateIsosurfaceStyle" />
+              <span>显示等值面填充（关闭后仅边界）</span>
+            </label>
           </div>
           <div class="control-row inline-row">
             <label class="sub-checkbox">
@@ -221,18 +241,18 @@
           <div v-else class="empty-tip">鼠标悬浮在海浪多边形上查看数值</div>
         </div>
 
-        <!-- 业务波高等级图例 (米) - 100% 对齐业务规范胶囊条 -->
-        <div class="section-title" style="margin-top: 6px">📊 波高等级图例 (米)</div>
+        <!-- 港珠澳业务波高等级图例 (对齐 glcb-web) -->
+        <div class="section-title" style="margin-top: 6px">📊 港珠澳波高图例 (对齐 glcb-web)</div>
         <div class="wave-legend-card">
           <div class="legend-text-row">
-            <span class="legend-txt-item">≥2米</span>
-            <span class="legend-txt-item">1~2米</span>
             <span class="legend-txt-item">&lt;1米</span>
+            <span class="legend-txt-item">1~2米</span>
+            <span class="legend-txt-item">≥2米</span>
           </div>
           <div class="legend-capsule-bar">
-            <div class="capsule-segment" style="background: #ef472d" title="≥2.0米 (红色)"></div>
-            <div class="capsule-segment" style="background: #78bb6e" title="1.0 ~ 2.0米 (绿色)"></div>
-            <div class="capsule-segment" style="background: #1a90ff" title="≥0 且 &lt;1.0米 (蓝色)"></div>
+            <div class="capsule-segment" style="background: #1990FF" title="&lt;1.0米 (蓝色)"></div>
+            <div class="capsule-segment" style="background: #78BA6E" title="1.0 ~ 2.0米 (绿色)"></div>
+            <div class="capsule-segment" style="background: #EE472E" title="≥2.0米 (红色)"></div>
           </div>
         </div>
 
@@ -370,6 +390,8 @@
 import L from "leaflet";
 import "@/utils/leaflet-vector-scalar";
 import BaseMap from "@/components/BaseMap.vue";
+import { createNcScalarFieldLayer } from "@/utils/nc-scalar-field";
+import WindLegend from "@/components/WindLegend.vue";
 import waveData from "@/assets/wave.json";
 import {
   gridToIsosurfaceGeoJSON,
@@ -380,6 +402,7 @@ export default {
   name: "NcWaveRangePage",
   components: {
     BaseMap,
+    WindLegend,
   },
   data() {
     return {
@@ -412,8 +435,13 @@ export default {
       showIsosurface: true, // 默认开启等值面矢量场
       isosurfaceOpacity: 0.65, // 面填充透明度
       showBorder: true, // 是否显示面边界线
+      showIsosurfaceFill: true,
       smoothIterations: 5, // 圆滑割角平滑等级 (0~10，支持滑块实时拖动调节，默认使用等级5圆滑模式)
       isosurfaceLayer: null, // L.geoJSON 图层实例
+      showScalarField: false,
+      scalarFieldOpacity: 0.65,
+      scalarFieldLayer: null,
+      correctContourOffset: true,
       waveLevels: DEFAULT_WAVE_LEVELS, // 波高等级与配色标准
 
       // 实时转换性能监控指标
@@ -534,6 +562,11 @@ export default {
 
     initPanes() {
       if (!this.map) return;
+      if (!this.map.getPane("scalarFieldPane")) {
+        const scalarPane = this.map.createPane("scalarFieldPane");
+        scalarPane.style.zIndex = 340;
+        scalarPane.style.pointerEvents = "none";
+      }
       // 1. 等值面专属 Pane: 严格沉底在最下方 (zIndex 350)，高于瓦片(200)，低于一切上层元素
       if (!this.map.getPane("isosurfacePane")) {
         const isoPane = this.map.createPane("isosurfacePane");
@@ -724,6 +757,10 @@ export default {
     updateWaveLayers() {
       if (!this.currentWaveData || !this.map) return;
 
+      if (this.showScalarField) {
+        this.renderScalarField();
+      }
+
       // 1. 等值面矢量场 (方案 A 纯前端实时转换)
       if (this.showIsosurface) {
         this.renderIsosurfaceLayer();
@@ -777,6 +814,7 @@ export default {
         bounds: this.bounds,
         levels: this.waveLevels,
         smoothIterations: this.smoothIterations,
+        alignToGridCenters: this.correctContourOffset,
       });
 
       this.algoCostMs = Number((performance.now() - tAlgo0).toFixed(1));
@@ -799,7 +837,7 @@ export default {
           const color = feature.properties.color || "#4da6ff";
           return {
             fillColor: color,
-            fillOpacity: this.isosurfaceOpacity,
+            fillOpacity: this.showIsosurfaceFill ? this.isosurfaceOpacity : 0,
             weight: this.showBorder ? 1 : 0,
             color: color,
             opacity: 0.85,
@@ -816,7 +854,7 @@ export default {
               e.target.setStyle({
                 weight: 2,
                 color: "#ffffff",
-                fillOpacity: Math.min(1, this.isosurfaceOpacity + 0.2),
+                fillOpacity: this.showIsosurfaceFill ? Math.min(1, this.isosurfaceOpacity + 0.2) : 0,
               });
             },
             mouseout: (e) => {
@@ -893,22 +931,30 @@ export default {
       const idx11 = j1 * nx + i1;
 
       const hs00 = hsData[idx00], hs10 = hsData[idx10], hs01 = hsData[idx01], hs11 = hsData[idx11];
-      if (hs00 === null || hs10 === null || hs01 === null || hs11 === null) {
+      const indices = [idx00, idx10, idx01, idx11];
+      const hasValidCell = indices.every((index) =>
+        Number.isFinite(hsData[index]) &&
+        (!uRec || Number.isFinite(uRec.data[index])) &&
+        (!vRec || Number.isFinite(vRec.data[index]))
+      );
+      if (!hasValidCell) {
         const nearestIdx = (fx < 0.5 ? i0 : i1) + (fy < 0.5 ? j0 : j1) * nx;
-        if (hsData[nearestIdx] === null) {
+        if (!Number.isFinite(hsData[nearestIdx]) ||
+          (uRec && !Number.isFinite(uRec.data[nearestIdx])) ||
+          (vRec && !Number.isFinite(vRec.data[nearestIdx]))) {
           return { isLand: true };
         }
+        return { isNoData: true };
       }
 
-      const hsSafe00 = hs00 || 0, hsSafe10 = hs10 || 0, hsSafe01 = hs01 || 0, hsSafe11 = hs11 || 0;
-      const hs = hsSafe00 * (1 - fx) * (1 - fy) + hsSafe10 * fx * (1 - fy) + hsSafe01 * (1 - fx) * fy + hsSafe11 * fx * fy;
+      const hs = hs00 * (1 - fx) * (1 - fy) + hs10 * fx * (1 - fy) + hs01 * (1 - fx) * fy + hs11 * fx * fy;
 
       let direction = 0;
       if (uRec && vRec) {
         const uData = uRec.data;
         const vData = vRec.data;
-        const u = (uData[idx00] || 0) * (1 - fx) * (1 - fy) + (uData[idx10] || 0) * fx * (1 - fy) + (uData[idx01] || 0) * (1 - fx) * fy + (uData[idx11] || 0) * fx * fy;
-        const v = (vData[idx00] || 0) * (1 - fx) * (1 - fy) + (vData[idx10] || 0) * fx * (1 - fy) + (vData[idx01] || 0) * (1 - fx) * fy + (vData[idx11] || 0) * fx * fy;
+        const u = uData[idx00] * (1 - fx) * (1 - fy) + uData[idx10] * fx * (1 - fy) + uData[idx01] * (1 - fx) * fy + uData[idx11] * fx * fy;
+        const v = vData[idx00] * (1 - fx) * (1 - fy) + vData[idx10] * fx * (1 - fy) + vData[idx01] * (1 - fx) * fy + vData[idx11] * fx * fy;
         direction = Math.round((Math.atan2(-u, -v) * 180 / Math.PI + 360) % 360);
       }
 
@@ -924,9 +970,9 @@ export default {
     },
 
     getWaveScaleInfo(hs) {
-      if (hs < 1.0) return { text: "<1米", color: "#1a90ff", textColor: "#ffffff" };
-      if (hs < 2.0) return { text: "1~2米", color: "#78bb6e", textColor: "#ffffff" };
-      return { text: "≥2米", color: "#ef472d", textColor: "#ffffff" };
+      if (hs < 1.0) return { text: "<1米", color: "#1990FF", textColor: "#ffffff" };
+      if (hs < 2.0) return { text: "1~2米", color: "#78BA6E", textColor: "#ffffff" };
+      return { text: "≥2米", color: "#EE472E", textColor: "#ffffff" };
     },
 
     showPointPopup(latlng) {
@@ -958,6 +1004,8 @@ export default {
         bodyHtml = '<div class="marine-popup-tip">预报网格范围外</div>';
       } else if (sample.isLand) {
         bodyHtml = '<div class="marine-popup-tip">🏝️ 陆地区域 (无海面数据)</div>';
+      } else if (sample.isNoData) {
+        bodyHtml = '<div class="marine-popup-tip">邻近网格含缺测值，无法插值</div>';
       } else {
         bodyHtml = `
           <div class="marine-popup-left">
@@ -1007,6 +1055,38 @@ export default {
       this.clickPopup.setLatLng(latlng).setContent(html).openOn(this.map);
     },
 
+    renderScalarField() {
+      if (!this.map || !this.showScalarField || !this.currentWaveData) return;
+      const record = this.currentWaveData.find(
+        (item) => item.header && item.header.parameterNumberName === "hs"
+      );
+      if (!record) return;
+      this.initPanes();
+      if (this.scalarFieldLayer) {
+        this.scalarFieldLayer.setData([record]);
+      } else {
+        this.scalarFieldLayer = createNcScalarFieldLayer(record, this.waveLevels, {
+          opacity: this.scalarFieldOpacity,
+          bounds: this.bounds,
+        }).addTo(this.map);
+      }
+    },
+
+    toggleScalarField() {
+      if (this.showScalarField) {
+        this.renderScalarField();
+      } else if (this.scalarFieldLayer) {
+        this.map.removeLayer(this.scalarFieldLayer);
+        this.scalarFieldLayer = null;
+      }
+    },
+
+    updateScalarFieldOpacity() {
+      if (this.scalarFieldLayer) {
+        this.scalarFieldLayer.setOpacity(this.scalarFieldOpacity);
+      }
+    },
+
     toggleIsosurface() {
       if (this.showIsosurface) {
         this.renderIsosurfaceLayer();
@@ -1022,7 +1102,7 @@ export default {
           const color = feature.properties.color || "#4da6ff";
           return {
             fillColor: color,
-            fillOpacity: this.isosurfaceOpacity,
+            fillOpacity: this.showIsosurfaceFill ? this.isosurfaceOpacity : 0,
             weight: this.showBorder ? 1 : 0,
             color: color,
             opacity: 0.85,
@@ -1070,18 +1150,21 @@ export default {
 
     addArrowLayer() {
       if (this.arrowLayer) return;
+      this.initPanes();
       const getWaveColor = (speed) => {
-        if (speed < 1.0) return "#1a90ff";
-        if (speed < 2.0) return "#78bb6e";
-        return "#ef472d";
+        if (speed < 1.0) return "#1990FF";
+        if (speed < 2.0) return "#78BA6E";
+        return "#EE472E";
       };
 
       this.arrowLayer = L.vectorArrowLayer({
+        pane: "particlePane",
         color: "#ffffff",
-        arrowSize: 18,
+        arrowSize: 27,
         gridSize: this.arrowGridSize,
         getColor: getWaveColor,
-        getSize: (s) => Math.min(28, 12 + s * 1.8),
+        // 浪向箭头整体放大为原来的 1.5 倍（18～42px），保留随矢量模长变化的比例。
+        getSize: (s) => Math.min(42, 18 + s * 2.7),
         alignToGrid: false,
       });
       this.arrowLayer.addTo(this.map);
@@ -1129,6 +1212,10 @@ export default {
     },
 
     removeWaveLayers() {
+      if (this.scalarFieldLayer) {
+        this.map.removeLayer(this.scalarFieldLayer);
+        this.scalarFieldLayer = null;
+      }
       if (this.isosurfaceLayer) {
         this.map.removeLayer(this.isosurfaceLayer);
         this.isosurfaceLayer = null;
@@ -1209,6 +1296,11 @@ export default {
 </script>
 
 <style scoped>
+.alignment-tip {
+  margin: 6px 0 12px;
+  line-height: 1.6;
+}
+
 .nc-wave-page {
   position: relative;
   width: 100%;
@@ -1258,6 +1350,8 @@ export default {
 .panel-body {
   padding: 12px 14px;
   font-size: 12px;
+  max-height: calc(100vh - 250px);
+  overflow-y: auto;
 }
 
 .section-title {
@@ -1891,22 +1985,33 @@ export default {
   filter: brightness(1.15);
 }
 
-/* 专属层级 Pane 绝对保障：等值面 350 在底层，陆地遮罩 380 压住陆地浪，粒子 450 在顶层 */
+.floating-wave-legend {
+  position: absolute;
+  left: 20px;
+  bottom: 140px;
+  z-index: 1000;
+  pointer-events: auto;
+}
+
+/* 专属层级 Pane 绝对保障：等值面 350 在底层，粒子 450 在中，陆地图包遮罩 500 压住陆地浪，注记 550 在顶层 */
 ::v-deep .leaflet-isosurfacePane-pane,
 ::v-deep .leaflet-isosurface-pane {
   z-index: 350 !important;
 }
-::v-deep .leaflet-landMask-pane {
-  z-index: 380 !important;
-  pointer-events: none !important;
-}
-::v-deep .leaflet-labels-pane {
-  z-index: 400 !important;
-  pointer-events: none !important;
-}
 ::v-deep .leaflet-particlePane-pane,
 ::v-deep .leaflet-particle-pane {
   z-index: 450 !important;
+  pointer-events: none !important;
+}
+::v-deep .leaflet-landCoverPane-pane,
+::v-deep .leaflet-landMaskPane-pane,
+::v-deep .leaflet-landMask-pane {
+  z-index: 500 !important;
+  pointer-events: none !important;
+}
+::v-deep .leaflet-mapLabelPane-pane,
+::v-deep .leaflet-labels-pane {
+  z-index: 550 !important;
   pointer-events: none !important;
 }
 

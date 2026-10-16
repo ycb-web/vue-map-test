@@ -49,6 +49,7 @@ L.CanvasLayer = (L.Layer ? L.Layer : L.Class).extend({
   },
   //-------------------------------------------------------------
   _onLayerDidMove: function _onLayerDidMove() {
+    if (!this._map || !this._canvas) return;
     var topLeft = this._map.containerPointToLayerPoint([0, 0]);
 
     L.DomUtil.setPosition(this._canvas, topLeft);
@@ -719,7 +720,8 @@ L.ScalarTileLayer = (L.GridLayer ? L.GridLayer : L.Class).extend({
       var record = scalar || uComp || vComp || data[0];
       this._header = record.header;
       currentWindData = record.data.map(function (v) {
-        return Math.abs(v);
+        // Math.abs(null) 为 0；缺测/陆地必须保持透明，不能变成低值颜色。
+        return µ.isValue(v) && Number.isFinite(v) ? Math.abs(v) : null;
       });
     }
 
@@ -1115,7 +1117,7 @@ L.VelocityLayer = (L.Layer ? L.Layer : L.Class).extend({
   },
   onAdd: function onAdd(map) {
     // determine where to add the layer
-    this._paneName = this.options.paneName || "overlayPane"; // fall back to overlayPane for leaflet < 1
+    this._paneName = this.options.paneName || this.options.pane || "overlayPane"; // fall back to overlayPane for leaflet < 1
 
     var pane = map._panes.overlayPane;
 
@@ -2552,6 +2554,17 @@ var Scalar = function Scalar(params) {
  interpolation and animation process.
  */
 
+function isParticlePathDefined(field, x, y, xt, yt) {
+  if (![x, y, xt, yt].every(Number.isFinite)) return false;
+  // 仅检查起终点会跨过窄缺测区；沿轨迹按不超过 1px 的步长验证。
+  var steps = Math.max(1, Math.ceil(Math.max(Math.abs(xt - x), Math.abs(yt - y))));
+  for (var step = 0; step <= steps; step++) {
+    var vector = field(x + (xt - x) * step / steps, y + (yt - y) * step / steps);
+    if (!vector || !vector.every(Number.isFinite)) return false;
+  }
+  return true;
+}
+
 var Windy = function Windy(params) {
   var MIN_VELOCITY_INTENSITY = params.minVelocity || 0; // velocity at which particle intensity is minimum (m/s)
 
@@ -2649,7 +2662,9 @@ var Windy = function Windy(params) {
       header: uComp.header,
       //recipe: recipeFor("wind-" + uComp.header.surface1Value),
       data: function data(i) {
-        return [uData[i], vData[i]];
+        // [null, null] 本身非空，必须把缺测矢量整体置为 null。
+        var u = uData[i], v = vData[i];
+        return Number.isFinite(u) && Number.isFinite(v) ? [u, v] : null;
       },
       interpolate: bilinearInterpolateVector,
     };
@@ -2769,7 +2784,7 @@ var Windy = function Windy(params) {
    * @returns {Object}
    */
 
-  var interpolate = function interpolate(λ, φ) {
+  var interpolate = function interpolate(λ, φ, maskOnly) {
     if (!grid) return null;
     var i = floorMod(λ - λ0, 360) / Δλ; // calculate longitude index in wrapped range [0, 360)
 
@@ -2791,6 +2806,7 @@ var Windy = function Windy(params) {
 
         if (isValue(g01) && isValue(g11)) {
           // All four points found, so interpolate the value.
+          if (maskOnly) return true;
           return builder.interpolate(i - fi, j - fj, g00, g10, g01, g11);
         }
       }
@@ -2872,7 +2888,11 @@ var Windy = function Windy(params) {
      */
     function field(x, y) {
       var column = columns[Math.round(x)];
-      return (column && column[Math.round(y)]) || NULL_WIND_VECTOR;
+      var vector = column && column[Math.round(y)];
+      if (!vector || !vector.every(Number.isFinite)) return NULL_WIND_VECTOR;
+      // 2px 速度缓存只用于运动速度，海陆掩膜须按粒子实际经纬度判断。
+      var coord = invert(x, y);
+      return coord && interpolate(coord[0], coord[1], true) ? vector : NULL_WIND_VECTOR;
     } // Frees the massive "columns" array for GC. Without this, the array is leaked (in Chrome) each time a new
     // field is interpolated because the field closure's context is leaked, for reasons that defy explanation.
 
@@ -3050,15 +3070,13 @@ var Windy = function Windy(params) {
           var xt = x + v[0];
           var yt = y + v[1];
 
-          if (field(xt, yt)[2] !== null) {
+          if (isParticlePathDefined(field, x, y, xt, yt)) {
             // Path from (x,y) to (xt,yt) is visible, so add this particle to the appropriate draw bucket.
             particle.xt = xt;
             particle.yt = yt;
             buckets[colorStyles.indexFor(m)].push(particle);
           } else {
-            // Particle isn't visible, but it still moves through the field.
-            particle.x = xt;
-            particle.y = yt;
+            particle.age = MAX_PARTICLE_AGE;
           }
         }
 
@@ -3159,15 +3177,31 @@ if (!window.cancelAnimationFrame) {
   };
 }
 
+/**
+ * L.VectorArrowLayer - 矢量流场/风场/浪场箭头图层
+ *
+ * 功能与设计架构：
+ * 1. 继承自 L.CanvasLayer，利用 HTML5 Canvas 高性能批量绘制流向矢量箭头；
+ * 2. 坐标系统与防漂移机制（核心特性）：
+ *    - 传统实现采用屏幕视口绝对像素网格（[0, width] 步进），在拖拽地图时 Canvas 随地图 Pane 平移，
+ *      但松手触发 moveend 重绘时会强制重置回固定屏幕像素插槽，导致所有箭头产生跳变与瞬移（偏移 Bug）；
+ *    - 本图层采用「世界投影坐标系网格锚定算法（EPSG:3857 CRS Grid Anchoring）」：
+ *      将网格采样原点对齐到地球世界投影坐标系（origin.add(topLeft) 对 gridSize 取模对齐），
+ *      确保采样网格点在世界地理空间中永久固定。拖拽过程中 Canvas 随 DOM 平移，松手重绘时计算出的
+ *      Canvas 局部坐标与拖拽后的物理像素完全严丝合缝重合，实现 100% 零漂移、零跳跃；
+ * 3. 抽稀自适应与性能保障：
+ *    - 保持 gridSize 像素间隔的屏幕自适应密度，避免数万物理格点全量绘制导致的严重拥挤与卡顿，保障 60fps 流畅度；
+ * 4. 支持气象风向、物理流向转换、动态颜色回调（getColor）及动态大小回调（getSize）。
+ */
 L.VectorArrowLayer = L.CanvasLayer.extend({
   options: {
-    color: "#ffffff",
-    arrowSize: 20,
-    gridSize: 50,
-    getColor: null, // 新增：动态颜色回调 function(speed) => color
-    getSize: null, // 新增：动态大小回调 function(speed) => size
-    alignToGrid: false, // 新增：是否对齐数据网格
-    autoGridZoom: null, // 新增：自动切换网格对齐的缩放级别
+    color: "#ffffff", // 默认箭头描边与填充颜色
+    arrowSize: 20, // 默认箭头基准长度（像素）
+    gridSize: 50, // 采样网格间距（像素），控制屏幕上箭头的疏密密度
+    getColor: null, // 动态颜色回调函数：function(speed) => string (如依据风速/流速渐变着色)
+    getSize: null, // 动态大小回调函数：function(speed) => number (如根据风速自适应箭头长度)
+    alignToGrid: false, // 是否开启数据原始物理网格 1:1 对齐模式（不抽稀）
+    autoGridZoom: null, // 达到指定缩放层级（zoom）时自动切换为原始物理网格对齐模式
   },
   initialize: function (options) {
     L.CanvasLayer.prototype.initialize.call(this, options);
@@ -3259,6 +3293,7 @@ L.VectorArrowLayer = L.CanvasLayer.extend({
           }
 
           var idx = j * header.nx + i;
+          if (!this._isValidVectorCell(idx)) continue;
           var u00 = this.uData[idx];
           var u10 = this.uData[idx + 1];
           var u01 = this.uData[idx + header.nx];
@@ -3271,16 +3306,44 @@ L.VectorArrowLayer = L.CanvasLayer.extend({
           var u = (u00 + u10 + u01 + u11) * 0.25;
           var v = (v00 + v10 + v01 + v11) * 0.25;
 
-          if (u !== undefined && v !== undefined) {
-            this._drawArrow(ctx, point.x, point.y, u, v);
-          }
+          this._drawArrow(ctx, point.x, point.y, u, v);
         }
       }
     } else {
-      // 原有模式：屏幕网格采样
-      for (var x = gridSize / 2; x < width; x += gridSize) {
-        for (var y = gridSize / 2; y < height; y += gridSize) {
-          var latlng = map.containerPointToLatLng(L.point(x, y));
+      /**
+       * 模式二：世界投影坐标系网格锚定采样模式（默认推荐模式）
+       *
+       * 【排错根因与解决原理】：
+       * 1. 传统屏幕绝对像素网格的缺陷：
+       *    若直接在 [0, width] 屏幕容器像素上循环采样，在用户拖拽地图时，整个 Canvas 随 Leaflet 的
+       *    mapPane 进行 CSS translate3d 平移（此时箭头跟随海面/地形一起运动）；但当鼠标松开触发 moveend 事件时，
+       *    底层 CanvasLayer 会执行 _onLayerDidMove 将 Canvas 复位并清空重绘。若此时重新从屏幕 [0, 0] 插槽生成箭头，
+       *    原本被拖动到新位置的箭头会瞬间消失，并强制弹回固定的屏幕插槽，造成肉眼可见的“跳动/偏移一下”。
+       *
+       * 2. 世界投影坐标系（EPSG:3857）网格锚定原理：
+       *    - origin: 当前缩放级别下，mapPane (0, 0) 在 Web 墨卡托世界投影坐标系中的绝对像素基准；
+       *    - topLeft: 当前视口左上角在 mapPane 中的相对图层坐标（containerPointToLayerPoint([0, 0])）；
+       *    - worldTopLeft: 当前屏幕视口左上角在地球世界投影坐标系下的绝对世界像素（origin.add(topLeft)）。
+       *    - 关键步：将遍历起点 startX/startY 按照 gridSize 的半步长对齐到世界像素坐标系中，
+       *      使其成为世界坐标的固定整数倍网格点（wx, wy）。
+       *    - 坐标转换：Canvas 内部绘制坐标 cx = wx - worldTopLeft.x，cy = wy - worldTopLeft.y。
+       *    - 结果保证：地图拖拽前后，同一个世界格点 (wx, wy) 对应的经纬度恒定不变，其在 Canvas 上的绘制位置
+       *      与拖拽平移后的像素位置严格重合，彻底实现拖拽松手 0 像素偏移与 0 视觉跳动！
+       */
+      var origin = map.getPixelOrigin();
+      var topLeft = map.containerPointToLayerPoint([0, 0]);
+      var worldTopLeft = origin.add(topLeft);
+
+      // 计算视口范围内首个与世界投影网格对齐的起点（带半步长偏移，使格点居中）
+      var startX = Math.floor(worldTopLeft.x / gridSize) * gridSize + gridSize / 2;
+      var startY = Math.floor(worldTopLeft.y / gridSize) * gridSize + gridSize / 2;
+
+      for (var wx = startX; wx < worldTopLeft.x + width + gridSize; wx += gridSize) {
+        for (var wy = startY; wy < worldTopLeft.y + height + gridSize; wy += gridSize) {
+          var cx = wx - worldTopLeft.x;
+          var cy = wy - worldTopLeft.y;
+
+          var latlng = map.unproject(L.point(wx, wy), zoom);
 
           var lon = latlng.lng;
           var lat = latlng.lat;
@@ -3304,6 +3367,7 @@ L.VectorArrowLayer = L.CanvasLayer.extend({
 
             var idx = j * header.nx + i;
             if (i < header.nx - 1 && j < header.ny - 1) {
+              if (!this._isValidVectorCell(idx)) continue;
               var u00 = this.uData[idx],
                 u10 = this.uData[idx + 1],
                 u01 = this.uData[idx + header.nx],
@@ -3324,14 +3388,29 @@ L.VectorArrowLayer = L.CanvasLayer.extend({
                 v01 * (1 - x_f) * y_f +
                 v11 * x_f * y_f;
 
-              this._drawArrow(ctx, x, y, u, v);
+              this._drawArrow(ctx, cx, cy, u, v);
             }
           }
         }
       }
     }
   },
+  _isValidVectorCell: function (idx) {
+    // 与标量面场一致：四角 U/V 均有效才插值，不能让 null 参与运算变成 0。
+    var nx = this.header.nx;
+    return (
+      Number.isFinite(this.uData[idx]) &&
+      Number.isFinite(this.uData[idx + 1]) &&
+      Number.isFinite(this.uData[idx + nx]) &&
+      Number.isFinite(this.uData[idx + nx + 1]) &&
+      Number.isFinite(this.vData[idx]) &&
+      Number.isFinite(this.vData[idx + 1]) &&
+      Number.isFinite(this.vData[idx + nx]) &&
+      Number.isFinite(this.vData[idx + nx + 1])
+    );
+  },
   _drawArrow: function (ctx, x, y, u, v) {
+    if (!Number.isFinite(u) || !Number.isFinite(v)) return;
     var speed = Math.sqrt(u * u + v * v);
     if (speed < 0.01) return;
 
@@ -3386,6 +3465,21 @@ L.vectorArrowLayer = function (options) {
   return new L.VectorArrowLayer(options);
 };
 
+/**
+ * 风杆图层：复用 VectorArrowLayer 的网格采样与四角 U/V 缺测过滤。
+ *
+ * 输入 U/V 的单位为 m/s；图形使用节制风速符号，羽数不能直接当作风力等级：
+ * - 一根短羽 = 5 节，一根长羽 = 10 节，一个实心三角旗 = 50 节。
+ * - 合成风速换算为节后，先按最近 5 节取整，再拆分为旗、长羽、短羽。
+ * - 例：10m/s → 约 19.4 节 → 20 节 → 两根长羽（页面 5 级）；
+ *       12m/s → 约 23.3 节 → 25 节 → 两长一短（页面 6 级）。
+ *
+ * 页面风级按未取整的 m/s 分档，风杆按 5 节量化，两者不是一一对应关系：
+ * 7.9m/s 与 8.0m/s 的页面分组不同，但均画成 15 节（一长一短）。
+ * 因此不能从羽数反推精确风级，也不能把同一风级绑定为唯一风杆图形。
+ *
+ * 杆从采样点伸向风的来向；这与矢量箭头指示风的去向相反。
+ */
 L.VectorBarbLayer = L.VectorArrowLayer.extend({
   options: {
     color: "#333333",
@@ -3393,23 +3487,23 @@ L.VectorBarbLayer = L.VectorArrowLayer.extend({
     gridSize: 60, // 风杆通常需要更大间距以免重叠
   },
   _drawArrow: function (ctx, x, y, u, v) {
-    // Reuse grid logic from VectorArrowLayer, but override draw method
+    // 父类负责采样与缺测过滤，此处仅将箭头绘制替换为风杆绘制。
     this._drawBarb(ctx, x, y, u, v);
   },
   _drawBarb: function (ctx, x, y, u, v) {
+    // 最终绘制入口再次校验分量；0 是有效分量，null/NaN 等不是无风。
+    if (!Number.isFinite(u) || !Number.isFinite(v)) return;
     var speedMS = Math.sqrt(u * u + v * v);
-    if (speedMS < 0.5) return; // calm
+    // 当前实现隐藏低于 0.5m/s 的符号，不单独绘制静风圆圈。
+    if (speedMS < 0.5) return;
 
-    // Convert m/s to knots (1 m/s = 1.94384 knots)
+    // 1 节 = 1 海里/小时；1m/s ≈ 1.94384 节。风级判断仍使用原始 m/s。
     var speedKnots = speedMS * 1.94384;
-    // Round to nearest 5
+    // 取最近的 5 节，不是向上取整；speed 随绘制依次扣除已表示的风速。
     var speed = Math.round(speedKnots / 5) * 5;
 
-    // Angle: Wind comes FROM.
-    // Vector (u, v) points WHERE wind goes.
-    // Screen Y is down (-v is North).
-    // Vector angle on screen: atan2(-v, u).
-    // Barb shaft points INTO the wind (opposite to vector).
+    // U 向东、V 向北，屏幕 Y 轴向下，所以去向角为 atan2(-v, u)。
+    // 再加 π 得到来向角，使杆的羽端朝向来风方向。
     var angle = Math.atan2(-v, u) + Math.PI;
 
     var len = this.options.barbSize;
@@ -3422,44 +3516,44 @@ L.VectorBarbLayer = L.VectorArrowLayer.extend({
     ctx.fillStyle = this.options.color;
     ctx.lineWidth = 1.5;
 
-    // Draw shaft: from (0,0) station to (len, 0)
+    // 局部原点 (0,0) 是数据采样点；杆向来向延伸 len 像素。
     ctx.beginPath();
     ctx.moveTo(0, 0);
     ctx.lineTo(len, 0);
     ctx.stroke();
 
-    // Draw station circle (optional, often just the start of shaft)
+    // 可选采样点圆圈，当前不绘制。
     // ctx.beginPath();
     // ctx.arc(0, 0, 2, 0, 2 * Math.PI);
     // ctx.fill();
 
-    // Draw barbs starting from the tail (len)
+    // 从杆的来向端开始排列符号，依次消耗 50、10、5 节。
     var pos = len;
     var barbLen = 10;
-    var slant = 3; // Slant towards station
+    var slant = 3; // 羽根相对杆端向采样点方向倾斜的像素量
 
-    // Pennants (50 knots) - Triangle
+    // 每个实心三角旗表示 50 节，可重复绘制以表示更高风速。
     while (speed >= 50) {
       ctx.beginPath();
       ctx.moveTo(pos, 0);
       ctx.lineTo(pos - 5, -barbLen);
       ctx.lineTo(pos - 10, 0);
-      ctx.fill(); // Filled triangle
-      pos -= 10; // Skip space
+      ctx.fill();
+      pos -= 10; // 给下一枚符号预留位置
       speed -= 50;
     }
 
-    // Long barbs (10 knots)
+    // 每根长羽表示 10 节；扣除所有三角旗后处理余量。
     while (speed >= 10) {
       ctx.beginPath();
       ctx.moveTo(pos, 0);
       ctx.lineTo(pos - slant, -barbLen);
       ctx.stroke();
-      pos -= 4; // Space between barbs
+      pos -= 4; // 相邻长羽的间距
       speed -= 10;
     }
 
-    // Short barbs (5 knots)
+    // 余量为 5 节时画一根半长短羽；整除 5 后不会出现其他余量。
     if (speed >= 5) {
       ctx.beginPath();
       ctx.moveTo(pos, 0);
@@ -3577,11 +3671,23 @@ L.VectorWaveLayer = L.CanvasLayer.extend({
     var dy = (header.la2 - header.la1) / (header.ny - 1);
     var phase = this._phase;
 
-    // 如果没有缓存，重新采样网格
+    // 如果没有缓存，重新采样网格（采用世界投影坐标系 EPSG:3857 网格锚定，彻底解决地图拖拽松手重绘瞬移 Bug）
     if (!this._wavePoints.length) {
-      for (var x = gridSize / 2; x < width; x += gridSize) {
-        for (var y = gridSize / 2; y < height; y += gridSize) {
-          var latlng = map.containerPointToLatLng(L.point(x, y));
+      var origin = map.getPixelOrigin();
+      var topLeft = map.containerPointToLayerPoint([0, 0]);
+      var worldTopLeft = origin.add(topLeft);
+      var zoom = map && map.getZoom ? map.getZoom() : null;
+
+      // 对齐到世界投影坐标系网格起点，保证采样格点物理经纬度恒定固定
+      var startX = Math.floor(worldTopLeft.x / gridSize) * gridSize + gridSize / 2;
+      var startY = Math.floor(worldTopLeft.y / gridSize) * gridSize + gridSize / 2;
+
+      for (var wx = startX; wx < worldTopLeft.x + width + gridSize; wx += gridSize) {
+        for (var wy = startY; wy < worldTopLeft.y + height + gridSize; wy += gridSize) {
+          var cx = wx - worldTopLeft.x;
+          var cy = wy - worldTopLeft.y;
+
+          var latlng = map.unproject(L.point(wx, wy), zoom);
           var lon = latlng.lng;
           var lat = latlng.lat;
           var hLon = lon;
@@ -3615,7 +3721,7 @@ L.VectorWaveLayer = L.CanvasLayer.extend({
                 this.vData[idx + header.nx + 1] * x_f * y_f;
               var speed = Math.sqrt(u * u + v * v);
               if (speed >= this.options.minSpeed) {
-                this._wavePoints.push({ x: x, y: y, u: u, v: v, speed: speed });
+                this._wavePoints.push({ x: cx, y: cy, u: u, v: v, speed: speed });
               }
             }
           }
@@ -3698,7 +3804,7 @@ L.WaveParticleLayer = L.Layer.extend({
     L.setOptions(this, options);
   },
   onAdd: function (map) {
-    this._paneName = this.options.paneName || "overlayPane";
+    this._paneName = this.options.paneName || this.options.pane || "overlayPane";
     var pane = map._panes.overlayPane;
     if (map.getPane) {
       pane = map.getPane(this._paneName);
@@ -3844,7 +3950,8 @@ var WaveParticleEngine = function (params) {
       return {
         header: uComp.header,
         data: function (i) {
-          return [uComp.data[i], vComp.data[i]];
+          var u = uComp.data[i], v = vComp.data[i];
+          return Number.isFinite(u) && Number.isFinite(v) ? [u, v] : null;
         },
         interpolate: bilinearInterp,
       };
@@ -3857,8 +3964,8 @@ var WaveParticleEngine = function (params) {
         data: function (i) {
           var dir = dirComp.data[i];
           var period = periodComp.data[i];
-          if (dir === null || period === null || period === 0) {
-            return [null, null];
+          if (!Number.isFinite(dir) || !Number.isFinite(period) || period <= 0) {
+            return null;
           }
           // 波浪方向是"来向"，需要转换为"去向"（加180度）
           // 速度用周期的倒数表示（周期越短，波浪越强）
@@ -3877,7 +3984,7 @@ var WaveParticleEngine = function (params) {
     return {
       header: data[0].header,
       data: function () {
-        return [null, null];
+        return null;
       },
       interpolate: bilinearInterp,
     };
@@ -3914,7 +4021,7 @@ var WaveParticleEngine = function (params) {
     callback({ interpolate: interpolate });
   };
 
-  var interpolate = function (λ, φ) {
+  var interpolate = function (λ, φ, maskOnly) {
     if (!grid) return null;
     var i = ((((λ - λ0) % 360) + 360) % 360) / Δλ;
     var j = (φ0 - φ) / Δφ;
@@ -3929,8 +4036,9 @@ var WaveParticleEngine = function (params) {
         if (row2) {
           var g01 = row2[fi],
             g11 = row2[fi + 1];
-          if (g01 != null && g11 != null)
-            return builder.interpolate(i - fi, j - fj, g00, g10, g01, g11);
+          if (g01 != null && g11 != null) {
+            return maskOnly ? true : builder.interpolate(i - fi, j - fj, g00, g10, g01, g11);
+          }
         }
       }
     }
@@ -3949,7 +4057,11 @@ var WaveParticleEngine = function (params) {
   var createField = function (columns, bounds, callback) {
     function field(x, y) {
       var c = columns[Math.round(x)];
-      return (c && c[Math.round(y)]) || NULL_VECTOR;
+      var vector = c && c[Math.round(y)];
+      if (!vector || !vector.every(Number.isFinite)) return NULL_VECTOR;
+      // 不能把相邻缓存像素的有效速度复制到实际缺测位置。
+      var coord = invert(x, y);
+      return coord && interpolate(coord[0], coord[1], true) ? vector : NULL_VECTOR;
     }
     field.release = function () {
       columns = [];
@@ -4024,6 +4136,8 @@ var WaveParticleEngine = function (params) {
 
     function evolve() {
       particles.forEach(function (p) {
+        // 每帧重置可绘制状态，不能沿用失效前的目标位置。
+        p.xt = p.yt = p.m = undefined;
         if (p.age > MAX_PARTICLE_AGE) {
           field.randomize(p).age = 0;
         }
@@ -4034,13 +4148,12 @@ var WaveParticleEngine = function (params) {
         } else {
           var xt = p.x + v[0],
             yt = p.y + v[1];
-          if (field(xt, yt)[2] !== null) {
+          if (isParticlePathDefined(field, p.x, p.y, xt, yt)) {
             p.xt = xt;
             p.yt = yt;
             p.m = m;
           } else {
-            p.x = xt;
-            p.y = yt;
+            p.age = MAX_PARTICLE_AGE;
           }
         }
         p.age++;
@@ -4069,6 +4182,13 @@ var WaveParticleEngine = function (params) {
         var nx = -dy / dist,
           ny = dx / dist;
         var halfLen = LINE_LENGTH * 0.5;
+        if (!isParticlePathDefined(field,
+          p.x - nx * halfLen, p.y - ny * halfLen,
+          p.x + nx * halfLen, p.y + ny * halfLen)) {
+          p.x = p.xt;
+          p.y = p.yt;
+          return;
+        }
         // 淡入淡出
         var lr = p.age / MAX_PARTICLE_AGE;
         var a = lr < 0.15 ? lr / 0.15 : lr > 0.7 ? (1 - lr) / 0.3 : 1;

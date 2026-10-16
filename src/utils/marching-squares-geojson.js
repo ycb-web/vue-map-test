@@ -14,30 +14,33 @@ import { contours } from "d3-contour";
 
 /**
  * 默认海浪有效波高 (Hs) 业务分级与配色映射表 (单位: 米)
- * 业务标准:
- * - ≥ 2米: 红色 (#ef472d)
- * - 1~2米 (大于等于1米且小于2米): 绿色 (#78bb6e)
- * - < 1米 (大于等于0米且小于1米): 蓝色 (#1a90ff)
+ * 严格对齐 glcb-web 业务图例标准:
+ * - ≥ 2米: 红色 (#EE472E)
+ * - 1~2米 (大于等于1米且小于2米): 绿色 (#78BA6E)
+ * - < 1米 (大于等于0米且小于1米): 蓝色 (#1990FF)
  * 陆地/无数据: 严格设为 NaN / null，保持完全透明
  */
 export const DEFAULT_WAVE_LEVELS = [
-  { threshold: 0, color: "#1a90ff", text: "<1米", rangeText: "0 ~ 1.0m" },
-  { threshold: 1.0, color: "#78bb6e", text: "1~2米", rangeText: "1.0 ~ 2.0m" },
-  { threshold: 2.0, color: "#ef472d", text: "≥2米", rangeText: "≥ 2.0m" },
+  { threshold: 0, color: "#1990FF", text: "<1米", rangeText: "0 ~ 1.0m", level: 1 },
+  { threshold: 1.0, color: "#78BA6E", text: "1~2米", rangeText: "1.0 ~ 2.0m", level: 2 },
+  { threshold: 2.0, color: "#EE472E", text: "≥2米", rangeText: "≥ 2.0m", level: 3 },
 ];
 
 /**
- * 默认气象风速经典分级与配色映射表 (单位: 米/秒，对齐蒲福风级)
+ * 默认风力等级与配色映射表
+ * 严格对齐 glcb-web 港珠澳大桥业务风级图例标准:
+ * - ≥8级 (≥ 17.2 m/s): 红色 (#EE472E)
+ * - 7级 (13.9 ~ 17.2 m/s): 橙色 (#FF8813)
+ * - 6级 (10.8 ~ 13.9 m/s): 黄色 (#D4D40E)
+ * - 5级 (8.0 ~ 10.8 m/s): 绿色 (#78BA6E)
+ * - ≤4级 (< 8.0 m/s): 蓝色 (#1990FF)
  */
 export const DEFAULT_WIND_LEVELS = [
-  { threshold: 1.6, color: "#9ecae1", text: "1.6 - 3.3m/s (2级 轻风)" },
-  { threshold: 3.4, color: "#6baed6", text: "3.4 - 5.4m/s (3级 微风)" },
-  { threshold: 5.5, color: "#74c476", text: "5.5 - 7.9m/s (4级 和风)" },
-  { threshold: 8.0, color: "#a1d99b", text: "8.0 - 10.7m/s (5级 劲风)" },
-  { threshold: 10.8, color: "#fed976", text: "10.8 - 13.8m/s (6级 强风)" },
-  { threshold: 13.9, color: "#feb24c", text: "13.9 - 17.1m/s (7级 疾风)" },
-  { threshold: 17.2, color: "#f03b20", text: "17.2 - 20.7m/s (8级 大风)" },
-  { threshold: 20.8, color: "#bd0026", text: "20.8m/s+ (9级+ 烈风)" },
+  { threshold: 0, color: "#1990FF", text: "≤4级", rangeText: "< 8.0m/s", level: 4 },
+  { threshold: 8.0, color: "#78BA6E", text: "5级", rangeText: "8.0 ~ 10.8m/s", level: 5 },
+  { threshold: 10.8, color: "#D4D40E", text: "6级", rangeText: "10.8 ~ 13.9m/s", level: 6 },
+  { threshold: 13.9, color: "#FF8813", text: "7级", rangeText: "13.9 ~ 17.2m/s", level: 7 },
+  { threshold: 17.2, color: "#EE472E", text: "≥8级", rangeText: "≥ 17.2m/s", level: 8 },
 ];
 
 /**
@@ -144,6 +147,7 @@ export function chaikinSmoothRing(ring, level = 5) {
  * @param {number} options.height 网格行数 (ny, 例如 141)
  * @param {Array<Array<number>>} options.bounds 经纬度地理范围 [[南纬, 西经], [北纬, 东经]]
  * @param {Array<Object>} [options.levels] 等值面分级规则数组，默认 DEFAULT_WAVE_LEVELS
+ * @param {boolean} [options.alignToGridCenters=true] 扣除 d3-contour 的半像元中心偏移；false 仅用于旧版对照
  * @param {number} [options.smoothIterations=5] 复合平滑等级 (0~10，默认等级5)
  * @returns {Object} { geojson, costMs, featureCount, polygonCount }
  */
@@ -158,6 +162,7 @@ export function gridToIsosurfaceGeoJSON(options) {
     ],
     levels = DEFAULT_WAVE_LEVELS,
     smoothIterations = 5,
+    alignToGridCenters = true,
   } = options;
 
   if (!data || width <= 0 || height <= 0) {
@@ -184,9 +189,10 @@ export function gridToIsosurfaceGeoJSON(options) {
 
   // 2. 将数据中的 null / undefined / NaN 严格保留为 NaN，绝不误设为 0 (严格区分没数据与数据是0)
   const cleanValues = new Float64Array(width * height);
-  for (let i = 0; i < data.length; i++) {
+  cleanValues.fill(NaN);
+  for (let i = 0; i < Math.min(data.length, cleanValues.length); i++) {
     const val = data[i];
-    cleanValues[i] = typeof val === "number" && !isNaN(val) ? val : NaN;
+    cleanValues[i] = typeof val === "number" && Number.isFinite(val) ? val : NaN;
   }
 
   // 3. 执行 d3-contour Marching Squares 算法
@@ -226,8 +232,12 @@ export function gridToIsosurfaceGeoJSON(options) {
         const geoRing = new Array(ring.length);
         for (let ptIdx = 0; ptIdx < ring.length; ptIdx++) {
           const pt = ring[ptIdx];
-          const lng = minLng + pt[0] * dx;
-          const lat = maxLat - pt[1] * dy;
+          // d3-contour 把 data[i + j * width] 放在 (i + 0.5, j + 0.5)。
+          // NC header 的 lo1/la1 则是第一个格点中心，须先减半格再映射。
+          // 旧公式会让全部等值面向东、向南各错开 0.5 个网格。
+          const centerOffset = alignToGridCenters ? 0.5 : 0;
+          const lng = minLng + (pt[0] - centerOffset) * dx;
+          const lat = maxLat - (pt[1] - centerOffset) * dy;
           geoRing[ptIdx] = [
             Math.round(lng * 10000) / 10000,
             Math.round(lat * 10000) / 10000,

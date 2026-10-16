@@ -9,6 +9,9 @@
       @map-ready="onMapReady"
     />
 
+    <!-- 左下角悬浮标准风级图例 (完全对齐 glcb-web 业务规范) -->
+    <WindLegend mode="wind" class="floating-wind-legend" />
+
     <!-- 右上角控制器与参数看板 (采用与「风场」一致的图层控制选项) -->
     <div class="info-panel" :class="{ collapsed: panelCollapsed }">
       <div class="panel-header" @click="panelCollapsed = !panelCollapsed">
@@ -19,6 +22,38 @@
       <div class="panel-body" v-show="!panelCollapsed">
         <!-- 风场图层控制（与「风场」页面完全一致的 4 大图层） -->
         <div class="section-title">🎨 风场叠加图层</div>
+
+        <!-- 对照层直接插值同一帧标量网格，不经过等值面提取或几何平滑。 -->
+        <div class="control-item">
+          <label>
+            <input type="checkbox" v-model="showScalarField" @change="toggleScalarField" />
+            <span class="highlight-label">原始颜色面场（网格插值对照）</span>
+          </label>
+        </div>
+        <div v-if="showScalarField" class="sub-controls">
+          <div class="slider-row">
+            <span>面场透明度: {{ scalarFieldOpacity.toFixed(2) }}</span>
+            <input
+              type="range"
+              min="0.1"
+              max="1"
+              step="0.05"
+              v-model.number="scalarFieldOpacity"
+              @input="updateScalarFieldOpacity"
+            />
+          </div>
+        </div>
+        <div class="control-item">
+          <label>
+            <input type="checkbox" v-model="correctContourOffset" @change="renderIsosurfaceLayer" />
+            <span>修正等值面半格偏移（0.0375°）</span>
+          </label>
+        </div>
+        <div class="tip-sub alignment-tip">
+          对照方法：分别开关颜色面场和等值面；平滑设为0排除边界收缩。
+          同时开启时等值面在上方，可降低其透明度并显示面边界线；也可关闭等值面填充，只叠加边界。
+          取消勾选半格修正可还原旧坐标；两层均使用同一帧网格，不做人工平移。
+        </div>
 
         <!-- 1. 等值面矢量场 (方案 A: 纯前端现场 Marching Squares 追踪，置于最底层) -->
         <div class="control-item">
@@ -38,6 +73,12 @@
               v-model.number="isosurfaceOpacity"
               @input="updateIsosurfaceStyle"
             />
+          </div>
+          <div class="control-row inline-row">
+            <label class="sub-checkbox">
+              <input type="checkbox" v-model="showIsosurfaceFill" @change="updateIsosurfaceStyle" />
+              <span>显示等值面填充（关闭后仅边界）</span>
+            </label>
           </div>
           <div class="control-row inline-row">
             <label class="sub-checkbox">
@@ -96,6 +137,12 @@
             <input type="checkbox" v-model="showBarb" @change="toggleBarb" />
             <span>风杆图层 (专业气象风向标)</span>
           </label>
+        </div>
+        <div v-if="showBarb" class="sub-controls">
+          <p class="barb-scale-note">
+            风杆表示风速，不是直接数风级：短羽 5 节，长羽 10 节，三角旗 50 节；按 5 节取整。
+            例如 10m/s（5级）为两根长羽，12m/s（6级）为两长一短。准确风级以点击取值为准。
+          </p>
         </div>
 
         <!-- 5. 图包显示隐藏与背景色调试 -->
@@ -186,8 +233,8 @@
           <div v-else class="empty-tip">鼠标悬浮在风场多边形上查看数值</div>
         </div>
 
-        <!-- 蒲福风级图例条 -->
-        <div class="section-title" style="margin-top: 6px">📊 蒲福风级图例 (m/s)</div>
+        <!-- 港珠澳标准业务风级图例条 (对齐 glcb-web 5 级标准) -->
+        <div class="section-title" style="margin-top: 6px">📊 港珠澳风级图例 (对齐 glcb-web)</div>
         <div class="legend-bar">
           <div
             v-for="item in windLevels"
@@ -196,7 +243,7 @@
             :style="{ background: item.color }"
             :title="item.text"
           >
-            {{ item.threshold }}
+            {{ item.text }}
           </div>
         </div>
 
@@ -334,6 +381,8 @@
 import L from "leaflet";
 import "@/utils/leaflet-vector-scalar";
 import BaseMap from "@/components/BaseMap.vue";
+import { createNcScalarFieldLayer } from "@/utils/nc-scalar-field";
+import WindLegend from "@/components/WindLegend.vue";
 import {
   gridToIsosurfaceGeoJSON,
   DEFAULT_WIND_LEVELS,
@@ -343,20 +392,22 @@ export default {
   name: "NcWindRangePage",
   components: {
     BaseMap,
+    WindLegend,
   },
   data() {
     return {
       map: null,
       showBaseMapTiles: true, // 天地图底图显示隐藏
       oceanBgColor: "#aac6ee", // 海面垫底背景色 (#aac6ee / #ff0000)
-      currentBasemap: "tianditu_vec_transparent", // 默认启用天地图透明海(海陆分离)
+      // 业务规范：风的上方不应该有图包，海陆全域吹风，底图使用标准普通底图挂载在底层
+      currentBasemap: "tianditu_vec",
       basemaps: [
-        { key: "tianditu_vec_transparent", label: "天地图(透明海/海陆分离)" },
-        { key: "tianditu_vec", label: "天地图电子地图(原始)" },
+        { key: "tianditu_vec", label: "天地图电子地图(推荐)" },
         { key: "tianditu_img", label: "天地图影像" },
         { key: "tianditu_ter", label: "天地图地形" },
         { key: "gaode_vec", label: "高德地图" },
         { key: "dark", label: "暗色底图" },
+        { key: "tianditu_vec_transparent", label: "天地图(透明海图包)" },
       ],
       mapOptions: {
         center: [20.25, 113.25],
@@ -376,8 +427,13 @@ export default {
       showIsosurface: true, // 默认开启等值面矢量场 (底层)
       isosurfaceOpacity: 0.65, // 面填充透明度
       showBorder: true, // 是否显示面边界线
+      showIsosurfaceFill: true,
       smoothIterations: 2, // Chaikin 平滑轮次 (0, 1, 2, 3)
       isosurfaceLayer: null, // L.geoJSON 图层实例
+      showScalarField: false,
+      scalarFieldOpacity: 0.65,
+      scalarFieldLayer: null,
+      correctContourOffset: true,
       windLevels: DEFAULT_WIND_LEVELS, // 蒲福风级与配色标准
 
       // 实时转换性能监控指标
@@ -497,6 +553,11 @@ export default {
 
     initPanes() {
       if (!this.map) return;
+      if (!this.map.getPane("scalarFieldPane")) {
+        const scalarPane = this.map.createPane("scalarFieldPane");
+        scalarPane.style.zIndex = 340;
+        scalarPane.style.pointerEvents = "none";
+      }
       // 1. 等值面专属 Pane: 严格沉底在最下方 (zIndex 350)，高于瓦片(200)，低于一切上层元素
       if (!this.map.getPane("isosurfacePane")) {
         const isoPane = this.map.createPane("isosurfacePane");
@@ -679,6 +740,10 @@ export default {
     updateWindLayers() {
       if (!this.currentWindData || !this.map) return;
 
+      if (this.showScalarField) {
+        this.renderScalarField();
+      }
+
       // 1. 等值面矢量场 (方案 A 纯前端实时转换，严格置于最底层的 isosurfacePane)
       if (this.showIsosurface) {
         this.renderIsosurfaceLayer();
@@ -738,6 +803,7 @@ export default {
         bounds: this.bounds,
         levels: this.windLevels,
         smoothIterations: this.smoothIterations,
+        alignToGridCenters: this.correctContourOffset,
       });
       this.algoCostMs = Number((performance.now() - tAlgo0).toFixed(1));
       this.contourCostMs = this.algoCostMs;
@@ -759,7 +825,7 @@ export default {
           const color = feature.properties.color || "#00e5ff";
           return {
             fillColor: color,
-            fillOpacity: this.isosurfaceOpacity,
+            fillOpacity: this.showIsosurfaceFill ? this.isosurfaceOpacity : 0,
             weight: this.showBorder ? 1 : 0,
             color: color,
             opacity: 0.85,
@@ -776,7 +842,7 @@ export default {
               e.target.setStyle({
                 weight: 2,
                 color: "#ffffff",
-                fillOpacity: Math.min(1, this.isosurfaceOpacity + 0.2),
+                fillOpacity: this.showIsosurfaceFill ? Math.min(1, this.isosurfaceOpacity + 0.2) : 0,
               });
             },
             mouseout: (e) => {
@@ -854,20 +920,18 @@ export default {
       const u00 = uData[idx00], u10 = uData[idx10], u01 = uData[idx01], u11 = uData[idx11];
       const v00 = vData[idx00], v10 = vData[idx10], v01 = vData[idx01], v11 = vData[idx11];
 
-      // 陆地掩膜校验
-      if (u00 === null || u10 === null || u01 === null || u11 === null) {
+      // 与箭头、颜色面场一致：缺测邻点不能当成 0 参与双线性插值。
+      if (![u00, u10, u01, u11, v00, v10, v01, v11].every(Number.isFinite)) {
         const nearestIdx = (fx < 0.5 ? i0 : i1) + (fy < 0.5 ? j0 : j1) * nx;
-        if (uData[nearestIdx] === null) {
+        if (!Number.isFinite(uData[nearestIdx]) || !Number.isFinite(vData[nearestIdx])) {
           return { isLand: true };
         }
+        return { isNoData: true };
       }
 
       // 双线性插值真实物理量
-      const uSafe00 = u00 || 0, uSafe10 = u10 || 0, uSafe01 = u01 || 0, uSafe11 = u11 || 0;
-      const vSafe00 = v00 || 0, vSafe10 = v10 || 0, vSafe01 = v01 || 0, vSafe11 = v11 || 0;
-
-      const u = uSafe00 * (1 - fx) * (1 - fy) + uSafe10 * fx * (1 - fy) + uSafe01 * (1 - fx) * fy + uSafe11 * fx * fy;
-      const v = vSafe00 * (1 - fx) * (1 - fy) + vSafe10 * fx * (1 - fy) + vSafe01 * (1 - fx) * fy + vSafe11 * fx * fy;
+      const u = u00 * (1 - fx) * (1 - fy) + u10 * fx * (1 - fy) + u01 * (1 - fx) * fy + u11 * fx * fy;
+      const v = v00 * (1 - fx) * (1 - fy) + v10 * fx * (1 - fy) + v01 * (1 - fx) * fy + v11 * fx * fy;
 
       const speed = Math.sqrt(u * u + v * v);
       // 气象风向（来向）：以正北为0度，顺时针
@@ -884,20 +948,19 @@ export default {
       };
     },
 
+    /**
+     * 页面业务风级分组，speed 单位为 m/s，使用插值后未四舍五入的风速。
+     * 区间左闭右开：<8.0 归并为≤4级，[8.0,10.8) 为5级，
+     * [10.8,13.9) 为6级，[13.9,17.2) 为7级，≥17.2 归并为≥8级。
+     * level=4/8 是合并分组标识，不表示所有低风速都是4级或高风速都是8级。
+     * 风杆另按 5 节量化绘制，不能用羽数代替这里的风级判定。
+     */
     getBeaufortLevelInfo(speed) {
-      if (speed < 0.3) return { level: 0, text: "0级", color: "#e0f2fe", textColor: "#0369a1" };
-      if (speed < 1.6) return { level: 1, text: "1级", color: "#bae6fd", textColor: "#0284c7" };
-      if (speed < 3.4) return { level: 2, text: "2级", color: "#7dd3fc", textColor: "#0369a1" };
-      if (speed < 5.5) return { level: 3, text: "3级", color: "#bbf7d0", textColor: "#15803d" };
-      if (speed < 8.0) return { level: 4, text: "4级", color: "#86efac", textColor: "#166534" };
-      if (speed < 10.8) return { level: 5, text: "5级", color: "#7cd4b2", textColor: "#064e3b" };
-      if (speed < 13.9) return { level: 6, text: "6级", color: "#fde047", textColor: "#854d0e" };
-      if (speed < 17.2) return { level: 7, text: "7级", color: "#fed7aa", textColor: "#9a3412" };
-      if (speed < 20.8) return { level: 8, text: "8级", color: "#fdba74", textColor: "#9a3412" };
-      if (speed < 24.5) return { level: 9, text: "9级", color: "#fca5a5", textColor: "#991b1b" };
-      if (speed < 28.5) return { level: 10, text: "10级", color: "#f87171", textColor: "#7f1d1d" };
-      if (speed < 32.7) return { level: 11, text: "11级", color: "#ef4444", textColor: "#ffffff" };
-      return { level: 12, text: "12级", color: "#dc2626", textColor: "#ffffff" };
+      if (speed < 8.0) return { level: 4, text: "≤4级", color: "#1990FF", textColor: "#ffffff" };
+      if (speed < 10.8) return { level: 5, text: "5级", color: "#78BA6E", textColor: "#ffffff" };
+      if (speed < 13.9) return { level: 6, text: "6级", color: "#D4D40E", textColor: "#ffffff" };
+      if (speed < 17.2) return { level: 7, text: "7级", color: "#FF8813", textColor: "#ffffff" };
+      return { level: 8, text: "≥8级", color: "#EE472E", textColor: "#ffffff" };
     },
 
     showPointPopup(latlng) {
@@ -929,6 +992,8 @@ export default {
         bodyHtml = '<div class="marine-popup-tip">预报网格范围外</div>';
       } else if (sample.isLand) {
         bodyHtml = '<div class="marine-popup-tip">🏝️ 陆地区域 (无海面数据)</div>';
+      } else if (sample.isNoData) {
+        bodyHtml = '<div class="marine-popup-tip">邻近网格含缺测值，无法插值</div>';
       } else {
         bodyHtml = `
           <div class="marine-popup-left">
@@ -978,6 +1043,38 @@ export default {
       this.clickPopup.setLatLng(latlng).setContent(html).openOn(this.map);
     },
 
+    renderScalarField() {
+      if (!this.map || !this.showScalarField || !this.currentWindData) return;
+      const record = this.currentWindData.find(
+        (item) => item.header && item.header.parameterNumberName === "speed"
+      );
+      if (!record) return;
+      this.initPanes();
+      if (this.scalarFieldLayer) {
+        this.scalarFieldLayer.setData([record]);
+      } else {
+        this.scalarFieldLayer = createNcScalarFieldLayer(record, this.windLevels, {
+          opacity: this.scalarFieldOpacity,
+          bounds: this.bounds,
+        }).addTo(this.map);
+      }
+    },
+
+    toggleScalarField() {
+      if (this.showScalarField) {
+        this.renderScalarField();
+      } else if (this.scalarFieldLayer) {
+        this.map.removeLayer(this.scalarFieldLayer);
+        this.scalarFieldLayer = null;
+      }
+    },
+
+    updateScalarFieldOpacity() {
+      if (this.scalarFieldLayer) {
+        this.scalarFieldLayer.setOpacity(this.scalarFieldOpacity);
+      }
+    },
+
     toggleIsosurface() {
       if (this.showIsosurface) {
         this.renderIsosurfaceLayer();
@@ -993,7 +1090,7 @@ export default {
           const color = feature.properties.color || "#00e5ff";
           return {
             fillColor: color,
-            fillOpacity: this.isosurfaceOpacity,
+            fillOpacity: this.showIsosurfaceFill ? this.isosurfaceOpacity : 0,
             weight: this.showBorder ? 1 : 0,
             color: color,
             opacity: 0.85,
@@ -1042,17 +1139,19 @@ export default {
 
     addArrowLayer() {
       if (this.arrowLayer) return;
+      this.initPanes();
       const getColor = (speed) => {
-        if (speed < 5) return "#00ff00";
-        if (speed < 10) return "#ffff00";
-        if (speed < 15) return "#ff9900";
-        if (speed < 20) return "#ff0000";
-        return "#ff00ff";
+        if (speed < 8.0) return "#1990FF";
+        if (speed < 10.8) return "#78BA6E";
+        if (speed < 13.9) return "#D4D40E";
+        if (speed < 17.2) return "#FF8813";
+        return "#EE472E";
       };
 
       const getSize = (speed) => Math.min(32, 12 + speed * 1.1);
 
       this.arrowLayer = L.vectorArrowLayer({
+        pane: "particlePane",
         color: "#ffffff",
         arrowSize: 20,
         gridSize: this.arrowGridSize,
@@ -1068,7 +1167,11 @@ export default {
 
     addBarbLayer() {
       if (this.barbLayer) return;
+      this.initPanes();
+      // 传入原始 U/V（m/s），由风杆层换算为节；不要预先传入风级或取整风速。
+      // 白色仅用于符号可读性，风级色阶由等值面/风级图例表示。
       this.barbLayer = L.vectorBarbLayer({
+        pane: "particlePane",
         color: "#ffffff",
         barbSize: 28,
         gridSize: 55,
@@ -1119,6 +1222,10 @@ export default {
     },
 
     removeWindLayers() {
+      if (this.scalarFieldLayer) {
+        this.map.removeLayer(this.scalarFieldLayer);
+        this.scalarFieldLayer = null;
+      }
       if (this.isosurfaceLayer) {
         this.map.removeLayer(this.isosurfaceLayer);
         this.isosurfaceLayer = null;
@@ -1205,6 +1312,11 @@ export default {
 </script>
 
 <style scoped>
+.alignment-tip {
+  margin: 6px 0 12px;
+  line-height: 1.6;
+}
+
 .nc-range-page {
   position: relative;
   width: 100%;
@@ -1275,6 +1387,13 @@ export default {
   gap: 6px;
   cursor: pointer;
   color: #d9d9d9;
+}
+
+.barb-scale-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: #b8c9dc;
 }
 
 .sub-controls {
@@ -1802,22 +1921,27 @@ export default {
   cursor: default;
 }
 
-/* 专属层级 Pane 绝对保障：等值面 350 在底层，陆地遮罩 380 压住陆地浪，粒子 450 在顶层 */
+.floating-wind-legend {
+  position: absolute;
+  left: 20px;
+  bottom: 140px;
+  z-index: 1000;
+  pointer-events: auto;
+}
+
+/* 专属层级 Pane 绝对保障：等值面 350 在底层，粒子 450 在上，注记 550 在顶层。风上方无图包遮挡 */
 ::v-deep .leaflet-isosurfacePane-pane,
 ::v-deep .leaflet-isosurface-pane {
   z-index: 350 !important;
 }
-::v-deep .leaflet-landMask-pane {
-  z-index: 380 !important;
-  pointer-events: none !important;
-}
-::v-deep .leaflet-labels-pane {
-  z-index: 400 !important;
-  pointer-events: none !important;
-}
 ::v-deep .leaflet-particlePane-pane,
 ::v-deep .leaflet-particle-pane {
   z-index: 450 !important;
+  pointer-events: none !important;
+}
+::v-deep .leaflet-mapLabelPane-pane,
+::v-deep .leaflet-labels-pane {
+  z-index: 550 !important;
   pointer-events: none !important;
 }
 
